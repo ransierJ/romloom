@@ -17,10 +17,11 @@ import sys
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, Iterable, Optional, Tuple
 
-from . import config, db, platforms
+from . import config, db, platforms, thumbnails
 
 # Metadata fields we lift out of each media/textual/<stem>.xml.
 _TEXTUAL_FIELDS = (
@@ -37,6 +38,7 @@ class ScanStats:
     complete: int = 0
     partial: int = 0
     missing: int = 0
+    warmed: int = 0
     seconds: float = 0.0
 
 
@@ -83,6 +85,7 @@ class MediaIndex:
     def __init__(self) -> None:
         self.exact: Dict[str, str] = {}
         self.norm: Dict[str, str] = {}
+        self.src: Dict[str, str] = {}   # same keys -> absolute source path
 
     def add_dir(self, path: Path) -> None:
         try:
@@ -91,17 +94,42 @@ class MediaIndex:
             return
         with entries:
             for e in entries:
-                if not e.is_file():
-                    continue
-                stem = os.path.splitext(e.name)[0]
-                self.exact.setdefault(stem.lower(), e.name)
-                self.norm.setdefault(_normalize(stem), e.name)
+                if e.is_file():
+                    stem = os.path.splitext(e.name)[0]
+                    self.exact.setdefault(stem.lower(), e.name)
+                    self.norm.setdefault(_normalize(stem), e.name)
+                    self.src.setdefault(stem.lower(), e.path)
+                    self.src.setdefault(_normalize(stem), e.path)
+                elif e.is_dir():
+                    # Nested per-game folder (Skraper's disc layout, e.g.
+                    # box2dfront/<Game [ID]>/<ID>.png). Index by the folder name,
+                    # storing the "folder/innerfile" relative path.
+                    try:
+                        inner = os.scandir(e.path)
+                    except OSError:
+                        continue
+                    with inner:
+                        for f in inner:
+                            if not f.is_file() or f.name.startswith("."):
+                                continue
+                            rel = f"{e.name}/{f.name}"
+                            self.exact.setdefault(e.name.lower(), rel)
+                            self.norm.setdefault(_normalize(e.name), rel)
+                            self.src.setdefault(e.name.lower(), f.path)
+                            self.src.setdefault(_normalize(e.name), f.path)
+                            break
 
     def get(self, stem: str) -> Optional[str]:
         hit = self.exact.get(stem.lower())
         if hit:
             return hit
         return self.norm.get(_normalize(stem))
+
+    def get_path(self, stem: str) -> Optional[str]:
+        hit = self.src.get(stem.lower())
+        if hit:
+            return hit
+        return self.src.get(_normalize(stem))
 
 
 def _index_media(media_root: Path, candidates: Iterable[str]) -> MediaIndex:
@@ -110,6 +138,22 @@ def _index_media(media_root: Path, candidates: Iterable[str]) -> MediaIndex:
     for folder in candidates:
         idx.add_dir(media_root / folder)
     return idx
+
+
+def _pick(index: "MediaIndex", rom: "RomEntry") -> Optional[str]:
+    """Match by a game's primary stem, then its secondary stem (inner disc file)."""
+    v = index.get(rom.stem)
+    if v is None and rom.alt_stem:
+        v = index.get(rom.alt_stem)
+    return v
+
+
+def _pick_path(index: "MediaIndex", rom: "RomEntry") -> Optional[str]:
+    """The absolute source path for a game's matched media (for thumb warming)."""
+    v = index.get_path(rom.stem)
+    if v is None and rom.alt_stem:
+        v = index.get_path(rom.alt_stem)
+    return v
 
 
 def _parse_textual(path: Path) -> Dict[str, Optional[str]]:
@@ -130,6 +174,53 @@ def _parse_textual(path: Path) -> Dict[str, Optional[str]]:
     return data
 
 
+def _es_date_to_iso(d: Optional[str]) -> Optional[str]:
+    """EmulationStation date '19911102T000000' -> '1991-11-02' (textual format)."""
+    if not d:
+        return None
+    digits = re.sub(r"[^0-9]", "", d)[:8]
+    return f"{digits[0:4]}-{digits[4:6]}-{digits[6:8]}" if len(digits) == 8 else d
+
+
+def _parse_gamelist(path: Path) -> Dict[str, Dict[str, Optional[str]]]:
+    """Parse an EmulationStation gamelist.xml (as Skraper/Batocera/ES-DE write)
+    into {stem_key -> metadata}, matched by the <path> basename. Keyed by both
+    exact-lowercase and normalized stem so id/region-named ROMs still match."""
+    out: Dict[str, Dict[str, Optional[str]]] = {}
+    try:
+        root = ET.parse(path).getroot()
+    except (ET.ParseError, OSError):
+        return out
+    for game in root.findall("game"):
+        p = game.findtext("path") or ""
+        if not p:
+            continue
+        stem = os.path.splitext(os.path.basename(p.replace("\\", "/")))[0]
+        data: Dict[str, Optional[str]] = {
+            "name": game.findtext("name"),
+            "description": game.findtext("desc"),
+            "rating": game.findtext("rating"),
+            "releasedate": _es_date_to_iso(game.findtext("releasedate")),
+            "developer": game.findtext("developer"),
+            "publisher": game.findtext("publisher"),
+            "genre": game.findtext("genre"),
+            "players": game.findtext("players"),
+        }
+        data = {k: (v.strip() if isinstance(v, str) and v.strip() else None)
+                for k, v in data.items()}
+        out.setdefault(stem.lower(), data)
+        out.setdefault(_normalize(stem), data)
+    return out
+
+
+def _load_gamelist(sys_path: Path) -> Dict[str, Dict[str, Optional[str]]]:
+    """Find and parse a system's gamelist.xml (root, then media/)."""
+    for candidate in (sys_path / "gamelist.xml", sys_path / "media" / "gamelist.xml"):
+        if candidate.is_file():
+            return _parse_gamelist(candidate)
+    return {}
+
+
 def _coverage(assets: Dict[str, bool]) -> str:
     """complete = all required assets present; missing = none of them; else partial."""
     required = [assets.get(k, False) for k in config.COMPLETE_REQUIRES]
@@ -142,8 +233,9 @@ def _coverage(assets: Dict[str, bool]) -> str:
 
 # The media sub-folders whose mtime/count we fingerprint (plural + singular
 # variants, matching the scan's tolerant resolution).
-_SIG_DIRS = ("covers", "cover", "screenshots", "screenshot",
-             "wheels", "wheel", "marquees", "marquee", "textual")
+_SIG_DIRS = ("covers", "cover", "box2dfront", "box3d",
+             "screenshots", "screenshot", "wheels", "wheel",
+             "marquees", "marquee", "textual", "videos")
 
 
 def _dir_fingerprint(path: str) -> str:
@@ -190,11 +282,13 @@ class RomEntry:
     filename: str      # what the user selects (file name or disc-folder name)
     ext: str           # lowercased, no dot
     size: int
+    alt_stem: str = "" # secondary join key (inner ROM name for disc folders)
 
 
-def _disc_primary(folder: Path) -> Optional[Tuple[str, int]]:
-    """For a disc-style game folder, return (ext, size) of its largest ROM file."""
-    best: Optional[Tuple[str, int]] = None
+def _disc_primary(folder: Path) -> Optional[Tuple[str, str, int]]:
+    """For a disc-style game folder, return (inner_filename, ext, size) of its
+    largest ROM file."""
+    best: Optional[Tuple[str, str, int]] = None
     try:
         for e in os.scandir(folder):
             if not e.is_file() or e.name.startswith("."):
@@ -206,34 +300,112 @@ def _disc_primary(folder: Path) -> Optional[Tuple[str, int]]:
                 size = e.stat().st_size
             except OSError:
                 size = 0
-            if best is None or size > best[1]:
-                best = (ext.lstrip("."), size)
+            if best is None or size > best[2]:
+                best = (e.name, ext.lstrip("."), size)
     except OSError:
         return None
     return best
 
 
-def _enumerate_roms(sys_path: Path) -> Iterable[RomEntry]:
-    """File-based ROMs in the system root, plus disc-style game subfolders."""
-    for e in os.scandir(sys_path):
+_TRACK_RE = re.compile(r'(\S+\.(?:bin|img|raw|iso))', re.IGNORECASE)
+
+
+def _cue_referenced_files(sys_path: Path) -> set:
+    """Filenames referenced by .cue/.gdi sheets in a system folder — their track
+    files shouldn't also count as games."""
+    refs: set = set()
+    try:
+        entries = list(os.scandir(sys_path))
+    except OSError:
+        return refs
+    for e in entries:
+        if not e.is_file() or not e.name.lower().endswith(config.CUESHEET_EXTENSIONS):
+            continue
+        try:
+            text = Path(e.path).read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for m in re.finditer(r'FILE\s+"([^"]+)"', text):     # quoted (may contain spaces)
+            refs.add(_cue_basename(m.group(1)))
+        for m in _TRACK_RE.finditer(text):                   # unquoted / .gdi tracks
+            refs.add(_cue_basename(m.group(1).strip('"')))
+    return refs
+
+
+def _cue_basename(ref: str) -> str:
+    """Lowercased basename of a cue FILE reference, tolerant of Windows paths.
+    Cue sheets authored on Windows embed absolute paths with backslashes
+    (e.g. C:\\SEGA\\...\\GAME.BIN); Linux os.path.basename won't split those."""
+    ref = ref.replace("\\", "/")
+    return os.path.basename(ref).strip().lower()
+
+
+def _parse_region(filename: str) -> str:
+    """Comma-joined region tags from a No-Intro/GoodTools filename, e.g. 'USA,Europe'."""
+    tags = []
+    for group in re.findall(r'[\(\[]([^)\]]*)[)\]]', filename):
+        for tok in group.split(','):
+            t = tok.strip().lower()
+            for region, keys in config.REGION_TOKENS.items():
+                if t in keys and region not in tags:
+                    tags.append(region)
+    return ",".join(tags)
+
+
+def _enumerate_roms(sys_path: Path, allowed_exts: set | None = None) -> Iterable[RomEntry]:
+    """File-based ROMs in the system root, plus disc-style game subfolders.
+    allowed_exts, when given, is a lowercased extension allowlist ({'.nds'}):
+    only files with those extensions count (overrides NON_ROM_EXTENSIONS)."""
+    excluded = _cue_referenced_files(sys_path)
+    try:
+        entries = list(os.scandir(sys_path))
+    except OSError:
+        return
+    # Resolve file ROMs first so a subfolder sharing a file ROM's name can be
+    # recognised as that ROM's companion data rather than a standalone game.
+    file_stems: set = set()
+    files = []
+    dirs = []
+    for e in entries:
         name = e.name
         if name.startswith(".") or name in config.IGNORED_SYSTEM_DIRS:
             continue
         if e.is_file():
-            stem, ext = os.path.splitext(name)
-            if ext.lower() in config.NON_ROM_EXTENSIONS:
+            if name.lower() in excluded:
                 continue
-            try:
-                size = e.stat().st_size
-            except OSError:
-                size = 0
-            yield RomEntry(stem, name, ext.lstrip(".").lower(), size)
-        elif e.is_dir() and name != "media":
-            primary = _disc_primary(Path(e.path))
-            if primary is None:
-                continue  # empty / media-only dir, not a game
-            ext, size = primary
-            yield RomEntry(name, name, ext, size)
+            stem, ext = os.path.splitext(name)
+            if allowed_exts is not None:
+                if ext.lower() not in allowed_exts:
+                    continue
+            elif ext.lower() in config.NON_ROM_EXTENSIONS:
+                continue
+            file_stems.add(stem.lower())
+            files.append((e, name, stem, ext))
+        elif e.is_dir() and name.lower() not in config.NON_GAME_DIRS:
+            dirs.append((e, name))
+
+    for e, name, stem, ext in files:
+        try:
+            size = e.stat().st_size
+        except OSError:
+            size = 0
+        yield RomEntry(stem, name, ext.lstrip(".").lower(), size)
+
+    for e, name in dirs:
+        # A subfolder named like a sibling file ROM is that ROM's companion data,
+        # not its own game — e.g. MAME's <game>/<game>.chd beside <game>.zip. It
+        # travels with the file ROM on export, so don't list it separately.
+        if name.lower() in file_stems:
+            continue
+        primary = _disc_primary(Path(e.path))
+        if primary is None:
+            continue  # empty / media-only dir, not a game
+        inner_name, ext, size = primary
+        # Match media/metadata by folder name AND the inner ROM name, so
+        # scrapers that key by the inner disc file (e.g. Wii S5BETL.wbfs)
+        # still line up with this folder-named game.
+        yield RomEntry(name, name, ext, size,
+                       alt_stem=os.path.splitext(inner_name)[0])
 
 
 def _scan_system(conn, sys_dir: os.DirEntry, signature: str = "") -> tuple[int, int]:
@@ -245,6 +417,8 @@ def _scan_system(conn, sys_dir: os.DirEntry, signature: str = "") -> tuple[int, 
     media = {key: _index_media(media_root, cands)
              for key, cands in config.MEDIA_CANDIDATES.items()}
     textual = _index_media(media_root, ("textual",))
+    video = _index_media(media_root, config.VIDEO_CANDIDATES)
+    gamelist = _load_gamelist(sys_path)   # ES/Skraper metadata fallback
 
     conn.execute(
         "INSERT OR REPLACE INTO systems"
@@ -258,18 +432,39 @@ def _scan_system(conn, sys_dir: os.DirEntry, signature: str = "") -> tuple[int, 
     rom_count = 0
     complete_count = 0
     rows = []
-    for rom in _enumerate_roms(sys_path):
-        cover = media["cover"].get(rom.stem)
-        shot = media["screenshot"].get(rom.stem)
-        wheel = media["wheel"].get(rom.stem)
-        marquee = media["marquee"].get(rom.stem)
-        textual_name = textual.get(rom.stem)
-        has_textual = textual_name is not None
+    warm_targets: Dict[str, set] = {}   # abs media path -> {widths} to pre-thumb
+    allowed_exts = config.SYSTEM_ROM_EXTENSIONS.get(plat.canonical)
+    for rom in _enumerate_roms(sys_path, allowed_exts):
+        cover = _pick(media["cover"], rom)
+        shot = _pick(media["screenshot"], rom)
+        for asset, idx in (("cover", media["cover"]), ("screenshot", media["screenshot"])):
+            widths = config.THUMB_WARM_WIDTHS.get(asset)
+            if not widths:
+                continue
+            p = _pick_path(idx, rom)
+            if p:
+                warm_targets.setdefault(p, set()).update(widths)
+        wheel = _pick(media["wheel"], rom)
+        marquee = _pick(media["marquee"], rom)
+        video_name = _pick(video, rom)
+        textual_name = _pick(textual, rom)
 
+        # Metadata: per-game textual/ first, then gamelist.xml fallback.
         meta = {f: None for f in _TEXTUAL_FIELDS}
         meta["description"] = None
-        if has_textual:
+        has_meta = False
+        if textual_name:
             meta = _parse_textual(media_root / "textual" / textual_name)
+            has_meta = True
+        elif gamelist:
+            gm = gamelist.get(rom.stem.lower()) or gamelist.get(_normalize(rom.stem))
+            if not gm and rom.alt_stem:
+                gm = (gamelist.get(rom.alt_stem.lower())
+                      or gamelist.get(_normalize(rom.alt_stem)))
+            if gm:
+                meta = gm
+                has_meta = True
+        has_textual = has_meta  # column stores "has any metadata"
 
         rating = None
         if meta.get("rating"):
@@ -292,22 +487,116 @@ def _scan_system(conn, sys_dir: os.DirEntry, signature: str = "") -> tuple[int, 
             meta.get("name") or rom.stem, meta.get("description"), rating,
             meta.get("releasedate"), meta.get("developer"), meta.get("publisher"),
             meta.get("genre"), meta.get("players"),
-            cover, shot, wheel, marquee, int(has_textual), cov,
+            cover, shot, wheel, marquee, video_name, _parse_region(rom.filename),
+            int(has_textual), cov,
         ))
 
     conn.executemany(
         "INSERT INTO games"
         "(system_id, rom_filename, stem, ext, size_bytes,"
         " name, description, rating, releasedate, developer, publisher, genre, players,"
-        " cover_file, screenshot_file, wheel_file, marquee_file, has_textual, coverage) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        " cover_file, screenshot_file, wheel_file, marquee_file, video_file, region, has_textual, coverage) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         rows,
     )
     conn.execute(
         "UPDATE systems SET rom_count = ?, complete_count = ?, scan_sig = ? WHERE id = ?",
         (rom_count, complete_count, signature, plat.canonical),
     )
-    return rom_count, complete_count
+    warmed = _warm_thumbs(warm_targets)
+    return rom_count, complete_count, warmed
+
+
+def _warm_thumbs(targets: Dict[str, set]) -> int:
+    """Pre-generate thumbnails for a system's media, several widths per source
+    read, in parallel (NAS reads are latency-bound). Returns thumbs created."""
+    if not targets:
+        return 0
+    items = list(targets.items())
+    total = 0
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        for made in ex.map(lambda kv: thumbnails.warm(Path(kv[0]), kv[1]), items):
+            total += made
+    return total
+
+
+def reindex_media(conn, system_id: str, filenames=None) -> int:
+    """Re-resolve media + metadata for a system's games and UPDATE rows in place
+    (ids stay stable, unlike a full _scan_system which deletes+reinserts). Used
+    after a scrape writes fresh art/gamelist into the library. `filenames`, when
+    given, limits the refresh to those rom_filenames. Returns rows updated."""
+    row = conn.execute("SELECT folder FROM systems WHERE id = ?", (system_id,)).fetchone()
+    if not row:
+        return 0
+    sys_path = config.ROMS_ROOT / row["folder"]
+    media_root = sys_path / "media"
+    media = {k: _index_media(media_root, c) for k, c in config.MEDIA_CANDIDATES.items()}
+    textual = _index_media(media_root, ("textual",))
+    video = _index_media(media_root, config.VIDEO_CANDIDATES)
+    gamelist = _load_gamelist(sys_path)
+
+    want = set(filenames) if filenames is not None else None
+    games = conn.execute(
+        "SELECT id, rom_filename, stem FROM games WHERE system_id = ?", (system_id,)
+    ).fetchall()
+
+    warm_targets: Dict[str, set] = {}
+    updated = 0
+    complete_delta = 0
+    for g in games:
+        if want is not None and g["rom_filename"] not in want:
+            continue
+        rom = RomEntry(g["stem"], g["rom_filename"], "", 0)
+        cover = _pick(media["cover"], rom)
+        shot = _pick(media["screenshot"], rom)
+        wheel = _pick(media["wheel"], rom)
+        marquee = _pick(media["marquee"], rom)
+        video_name = _pick(video, rom)
+        textual_name = _pick(textual, rom)
+        for asset, idx in (("cover", media["cover"]), ("screenshot", media["screenshot"])):
+            p = _pick_path(idx, rom)
+            if p:
+                warm_targets.setdefault(p, set()).update(config.THUMB_WARM_WIDTHS.get(asset, ()))
+
+        meta = {f: None for f in _TEXTUAL_FIELDS}
+        meta["description"] = None
+        has_meta = False
+        if textual_name:
+            meta = _parse_textual(media_root / "textual" / textual_name)
+            has_meta = True
+        elif gamelist:
+            gm = gamelist.get(rom.stem.lower()) or gamelist.get(_normalize(rom.stem))
+            if gm:
+                meta = gm
+                has_meta = True
+
+        rating = None
+        if meta.get("rating"):
+            try:
+                rating = float(meta["rating"])
+            except ValueError:
+                rating = None
+        cov = _coverage({"cover": bool(cover), "screenshot": bool(shot),
+                         "wheel": bool(wheel), "marquee": bool(marquee), "textual": has_meta})
+        conn.execute(
+            "UPDATE games SET name=?, description=?, rating=?, releasedate=?, developer=?, "
+            "publisher=?, genre=?, players=?, cover_file=?, screenshot_file=?, wheel_file=?, "
+            "marquee_file=?, video_file=?, has_textual=?, coverage=? WHERE id=?",
+            (meta.get("name") or rom.stem, meta.get("description"), rating,
+             meta.get("releasedate"), meta.get("developer"), meta.get("publisher"),
+             meta.get("genre"), meta.get("players"), cover, shot, wheel, marquee,
+             video_name, int(has_meta), cov, g["id"]),
+        )
+        updated += 1
+
+    # Recompute the system's complete_count from scratch (cheap, one query).
+    cc = conn.execute(
+        "SELECT SUM(coverage='complete') c FROM games WHERE system_id=?", (system_id,)
+    ).fetchone()["c"] or 0
+    conn.execute("UPDATE systems SET complete_count=? WHERE id=?", (cc, system_id))
+    conn.commit()
+    _warm_thumbs(warm_targets)
+    return updated
 
 
 def scan(conn, roms_root: Path | None = None, force: bool = False) -> ScanStats:
@@ -335,8 +624,9 @@ def scan(conn, roms_root: Path | None = None, force: bool = False) -> ScanStats:
                                  (canonical,)).fetchone()):
             stats.skipped += 1
         else:
-            _scan_system(conn, sys_dir, sig)
+            _, _, warmed = _scan_system(conn, sys_dir, sig)
             stats.scanned += 1
+            stats.warmed += warmed
         stats.systems += 1
         conn.commit()
 
@@ -359,6 +649,7 @@ def scan(conn, roms_root: Path | None = None, force: bool = False) -> ScanStats:
     db.set_meta(conn, "last_scan_epoch", str(int(time.time())))
     db.set_meta(conn, "last_scan_seconds", str(stats.seconds))
     db.set_meta(conn, "last_scan_scanned", str(stats.scanned))
+    db.set_meta(conn, "last_scan_warmed", str(stats.warmed))
     db.set_meta(conn, "last_scan_skipped", str(stats.skipped))
     db.set_meta(conn, "roms_root", str(root))
     conn.commit()

@@ -48,6 +48,8 @@ CREATE TABLE IF NOT EXISTS games (
     screenshot_file TEXT,
     wheel_file      TEXT,
     marquee_file    TEXT,
+    video_file      TEXT,
+    region          TEXT,              -- comma-joined region tags (USA,Europe,…)
     has_textual     INTEGER NOT NULL DEFAULT 0,
 
     -- derived: "complete" | "partial" | "missing"
@@ -104,6 +106,27 @@ CREATE TABLE IF NOT EXISTS export_presets (
     assets  TEXT NOT NULL,          -- comma-separated asset keys
     mode    TEXT NOT NULL DEFAULT 'copy'
 );
+
+-- Reference catalog (No-Intro / Redump via libretro-database): the complete set
+-- of known titles per system, used by the Missing view. Parsed from a cached
+-- .dat; one row per deduped base title with its region buckets.
+CREATE TABLE IF NOT EXISTS catalog_titles (
+    system_id  TEXT NOT NULL,
+    title      TEXT NOT NULL,       -- display title, article un-folded
+    title_norm TEXT NOT NULL,       -- match key vs on-disk games
+    regions    TEXT,                -- csv, e.g. "USA,World"
+    PRIMARY KEY (system_id, title_norm)
+);
+CREATE INDEX IF NOT EXISTS idx_catalog_system ON catalog_titles(system_id);
+
+-- One row per system whose catalog has been fetched: when and which DAT version.
+CREATE TABLE IF NOT EXISTS catalog_meta (
+    system_id     TEXT PRIMARY KEY,
+    source        TEXT,             -- "no-intro" | "redump"
+    version       TEXT,             -- DAT version string
+    total         INTEGER NOT NULL DEFAULT 0,
+    fetched_epoch INTEGER NOT NULL DEFAULT 0
+);
 """
 
 
@@ -112,6 +135,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
     cols = {r[1] for r in conn.execute("PRAGMA table_info(systems)")}
     if cols and "scan_sig" not in cols:
         conn.execute("ALTER TABLE systems ADD COLUMN scan_sig TEXT")
+    gcols = {r[1] for r in conn.execute("PRAGMA table_info(games)")}
+    if gcols and "video_file" not in gcols:
+        conn.execute("ALTER TABLE games ADD COLUMN video_file TEXT")
+    if gcols and "region" not in gcols:
+        conn.execute("ALTER TABLE games ADD COLUMN region TEXT")
 
 
 def connect(db_path: Path | None = None) -> sqlite3.Connection:

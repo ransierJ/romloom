@@ -5,9 +5,14 @@ import { CuratePicker, CollectionHeader } from './components/Collections.jsx'
 import GameDrawer from './components/GameDrawer.jsx'
 import ExportDialog from './components/ExportDialog.jsx'
 import MappingEditor from './components/MappingEditor.jsx'
+import MissingView from './components/MissingView.jsx'
+import SettingsDialog from './components/SettingsDialog.jsx'
+import ScrapeStatus from './components/ScrapeStatus.jsx'
 
 const VIEWS = ['List', 'Details', 'Boxart', 'Gaps']
 const PAGE = 100
+// Region filter options — must mirror the keys of config.REGION_TOKENS.
+const REGIONS = ['USA', 'Europe', 'Japan', 'World', 'Asia', 'Korea', 'Brazil', 'Australia', 'China']
 
 function useDebounced(value, ms) {
   const [v, setV] = React.useState(value)
@@ -21,18 +26,21 @@ function useDebounced(value, ms) {
 const initial = new URLSearchParams(window.location.search)
 
 export default function App() {
-  const [mode, setMode] = React.useState(initial.get('mode') === 'collections' ? 'collections' : 'library')
+  const [mode, setMode] = React.useState(
+    ['collections', 'missing'].includes(initial.get('mode')) ? initial.get('mode') : 'library')
   const [systems, setSystems] = React.useState([])
   const [active, setActive] = React.useState(initial.get('system') || null)
   const [view, setView] = React.useState(VIEWS.includes(initial.get('view')) ? initial.get('view') : 'Boxart')
   const [search, setSearch] = React.useState('')
   const [coverage, setCoverage] = React.useState('')
+  const [region, setRegion] = React.useState('')
   const [sort, setSort] = React.useState('name')
 
   const [collections, setCollections] = React.useState([])
   const [curateInto, setCurateInto] = React.useState(initial.get('curate') ? Number(initial.get('curate')) : null)
   const [activeCollection, setActiveCollection] = React.useState(initial.get('collection') ? Number(initial.get('collection')) : null)
   const [collDetail, setCollDetail] = React.useState(null)
+  const [collSystem, setCollSystem] = React.useState(null)   // filter a collection to one system
 
   const [games, setGames] = React.useState([])
   const [total, setTotal] = React.useState(0)
@@ -44,7 +52,26 @@ export default function App() {
   const [reloadKey, setReloadKey] = React.useState(0)
   const [exportOpen, setExportOpen] = React.useState(initial.get('export') === '1')
   const [mapOpen, setMapOpen] = React.useState(initial.get('mapping') === '1')
+  const [selectMode, setSelectMode] = React.useState(initial.get('select') === '1')
+  const [selectedIds, setSelectedIds] = React.useState(() => new Set())
+  const [settingsOpen, setSettingsOpen] = React.useState(false)
+  const [scrapeInfo, setScrapeInfo] = React.useState(null)   // {installed, credentials_set, platform}
+  const [scrapeStatus, setScrapeStatus] = React.useState(null)
+  const [scrapeModal, setScrapeModal] = React.useState(false)
+  const pollingRef = React.useRef(false)
+  const waitersRef = React.useRef([])
   const forceReload = () => { setOffset(0); setReloadKey((k) => k + 1) }
+
+  const toggleSelected = (id) => setSelectedIds((s) => {
+    const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n
+  })
+  const exitSelect = () => { setSelectMode(false); setSelectedIds(new Set()) }
+  // Leave select mode when the system/collection changes (but not on first mount).
+  const selFirst = React.useRef(true)
+  React.useEffect(() => {
+    if (selFirst.current) { selFirst.current = false; return }
+    exitSelect()
+  }, [mode, active, activeCollection])
 
   const dSearch = useDebounced(search, 250)
 
@@ -67,16 +94,23 @@ export default function App() {
   }, [])
 
   // Reset paging on any query change.
-  React.useEffect(() => { setOffset(0) }, [mode, active, activeCollection, dSearch, coverage, sort, curateInto])
+  React.useEffect(() => { setOffset(0) }, [mode, active, activeCollection, dSearch, coverage, region, sort, curateInto, collSystem])
+
+  // A system filter only applies within one collection — clear it on switch.
+  React.useEffect(() => { setCollSystem(null) }, [activeCollection, mode])
+
+  // Changing system clears a region filter that may not apply to the new system.
+  React.useEffect(() => { setRegion('') }, [active])
 
   // Fetch a page for whichever mode is active.
   React.useEffect(() => {
+    if (mode === 'missing') return   // Missing view fetches its own data
     let alive = true
-    const opts = { search: dSearch, coverage, sort, limit: PAGE, offset }
+    const opts = { search: dSearch, coverage, region: region || null, sort, limit: PAGE, offset }
     let req
     if (mode === 'collections') {
       if (!activeCollection) { setGames([]); setTotal(0); return }
-      req = api.collectionGames(activeCollection, opts)
+      req = api.collectionGames(activeCollection, { ...opts, system: collSystem || '' })
     } else {
       if (!active) { setGames([]); setTotal(0); return }
       req = api.games(active, { ...opts, selectedFor: curateInto })
@@ -89,7 +123,7 @@ export default function App() {
     }).catch(() => { if (alive) { setGames([]); setTotal(0) } })
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
-  }, [mode, active, activeCollection, dSearch, coverage, sort, offset, curateInto, reloadKey])
+  }, [mode, active, activeCollection, dSearch, coverage, region, sort, offset, curateInto, collSystem, reloadKey])
 
   // Collection detail for the Collections page header.
   React.useEffect(() => {
@@ -108,6 +142,22 @@ export default function App() {
   const activeSys = systems.find((s) => s.id === active)
   const View = { List: ListView, Details: DetailsView, Boxart: BoxartView, Gaps: GapsView }[view]
   const hasMore = games.length < total
+
+  // Infinite scroll: auto-load the next page when a sentinel nears the viewport,
+  // so a whole system streams in as you scroll (images are lazy, so only the
+  // visible covers actually fetch). The button below stays as a manual fallback.
+  const sentinelRef = React.useRef(null)
+  React.useEffect(() => {
+    if (!hasMore || loading) return
+    const el = sentinelRef.current
+    if (!el) return
+    const io = new IntersectionObserver(
+      (entries) => { if (entries[0].isIntersecting) setOffset((o) => o + PAGE) },
+      { rootMargin: '800px' },
+    )
+    io.observe(el)
+    return () => io.disconnect()
+  }, [hasMore, loading, games.length])
 
   // ---- collection mutations ----
   const newCollection = async () => {
@@ -158,29 +208,153 @@ export default function App() {
     await api.deleteCollection(activeCollection)
     setActiveCollection(null); setCollDetail(null); loadCollections(); setMode('library')
   }
+  const refreshCollectionMeta = async () => {
+    try {
+      const d = await api.refreshCollection(activeCollection)
+      setCollDetail(d); forceReload(); loadCollections()
+      flash(`Refreshed metadata for ${d.updated} game${d.updated === 1 ? '' : 's'}`)
+    } catch { flash('Refresh failed') }
+  }
+  const pruneCollectionDangling = async () => {
+    const n = collDetail.game_count - collDetail.resolved
+    if (n <= 0) return
+    if (!window.confirm(`Remove ${n} unresolved item${n === 1 ? '' : 's'} (ROMs no longer in the library) from “${collDetail.name}”? The ROMs themselves aren’t touched.`)) return
+    try {
+      const d = await api.pruneCollection(activeCollection)
+      setCollDetail(d); loadCollections(); forceReload()
+      flash(`Removed ${d.removed} unresolved item${d.removed === 1 ? '' : 's'}`)
+    } catch { flash('Clean failed') }
+  }
 
-  const sel = mode === 'collections'
-    ? { active: true, isOn: () => true, toggle: removeFromCollection }
-    : (curateInto != null
-        ? { active: true, isOn: (g) => !!g.selected, toggle: toggleMembership }
-        : null)
+  const bulkDeleteSelected = async () => {
+    const ids = [...selectedIds]
+    if (!ids.length) return
+    if (!window.confirm(`Permanently delete ${ids.length} game${ids.length > 1 ? 's' : ''} and their media from disk? This cannot be undone.`)) return
+    try {
+      const res = await api.bulkDelete(ids)
+      setGames((gs) => gs.filter((g) => !selectedIds.has(g.id)))
+      setTotal((t) => Math.max(0, t - res.deleted_count))
+      loadSystems()
+      if (mode === 'collections' && activeCollection) api.collection(activeCollection).then(setCollDetail).catch(() => {})
+      flash(`Deleted ${res.deleted_count} from disk`)
+      exitSelect()
+    } catch (e) {
+      flash(e.status === 409 ? 'Library is read-only — make the mount writable to delete' : 'Delete failed')
+    }
+  }
 
-  const openGame = (g) => setOpenId(g.id)
+  const bulkAddToCollection = async (cid) => {
+    // Send ids, not loaded rows: a selection can span pages that aren't all in
+    // the `games` array, and the backend resolves the natural key per id.
+    const ids = [...selectedIds]
+    if (!ids.length) return
+    const label = collections.find((c) => c.id === cid)?.name || 'collection'
+    try {
+      const d = await api.addGamesByIds(cid, ids)
+      loadCollections()
+      flash(`Added ${ids.length} to “${label}”${d && d.game_count != null ? ` — ${d.game_count} games total` : ''}`)
+      exitSelect()
+    } catch {
+      flash('Add to collection failed')
+    }
+  }
+
+  const bulkAddToNewCollection = async () => {
+    const name = window.prompt('Name this collection (e.g. "RG35XX", "Living room")')
+    if (!name || !name.trim()) return
+    const c = await api.createCollection(name.trim())
+    await loadCollections()
+    await bulkAddToCollection(c.id)
+  }
+
+  // Which scraper options are available for the active system.
+  React.useEffect(() => {
+    if (!active) { setScrapeInfo(null); return }
+    let alive = true
+    api.scrapeAvailable(active).then((a) => { if (alive) setScrapeInfo(a) }).catch(() => {})
+    return () => { alive = false }
+  }, [active, settingsOpen])
+
+  // One poll loop drives the status object + the banner/modal; terminal states
+  // refresh the view and resolve any awaiting callers.
+  const beginPolling = () => {
+    if (pollingRef.current) return
+    pollingRef.current = true
+    const tick = async () => {
+      let st
+      try { st = await api.scrapeStatus() } catch { setTimeout(tick, 1500); return }
+      setScrapeStatus(st)
+      if (st.state === 'running' || st.state === 'paused') { setTimeout(tick, 1500); return }
+      pollingRef.current = false
+      if (st.state === 'done' || st.state === 'stopped') { forceReload(); loadSystems() }
+      const waiters = waitersRef.current; waitersRef.current = []
+      waiters.forEach((r) => r(st.state === 'done'))
+    }
+    tick()
+  }
+
+  // Resume polling if a scrape is already running when the app loads.
+  React.useEffect(() => {
+    api.scrapeStatus().then((st) => {
+      if (st.state === 'running' || st.state === 'paused') { setScrapeStatus(st); beginPolling() }
+    }).catch(() => {})
+  }, [])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const runScrape = async (payload) => {
+    try {
+      await api.startScrape(payload)
+    } catch (e) {
+      flash(/409/.test(e.message) ? 'A scrape is already running'
+        : 'Set your ScreenScraper login in Settings first')
+      if (/400|401/.test(e.message)) setSettingsOpen(true)
+      return false
+    }
+    setScrapeModal(true)
+    return new Promise((resolve) => { waitersRef.current.push(resolve); beginPolling() })
+  }
+
+  const scrapeSystem = async () => {
+    if (!activeSys) return
+    if (await runScrape({ system_id: active })) flash(`Scraped ${activeSys.display_name}`)
+  }
+
+  const scrapeSelected = async () => {
+    const ids = [...selectedIds]
+    if (!ids.length) return
+    if (await runScrape({ system_id: active, game_ids: ids })) { exitSelect(); flash(`Scraped ${ids.length} games`) }
+  }
+
+  const restartScrape = (request) => { runScrape(request) }
+
+  const canScrape = scrapeInfo && scrapeInfo.installed && scrapeInfo.platform
+  const scrapeBusy = scrapeStatus && (scrapeStatus.state === 'running' || scrapeStatus.state === 'paused')
+
+  // Select mode (for bulk delete) takes over the checkboxes when active.
+  const sel = selectMode
+    ? { active: true, isOn: (g) => selectedIds.has(g.id), toggle: (g) => toggleSelected(g.id) }
+    : (mode === 'collections'
+        ? { active: true, isOn: () => true, toggle: removeFromCollection }
+        : (curateInto != null
+            ? { active: true, isOn: (g) => !!g.selected, toggle: toggleMembership }
+            : null))
+
+  const openGame = (g) => (selectMode ? toggleSelected(g.id) : setOpenId(g.id))
 
   return (
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
-          <span className="mark">🕹</span><b>ROMFORGE</b><span className="ver">v0.4</span>
+          <span className="mark">🕹</span><b>ROMFORGE</b><span className="ver">v0.7.7</span>
         </div>
         <div className="tabs">
           <button className={mode === 'library' ? 'on' : ''} onClick={() => setMode('library')}>Systems</button>
           <button className={mode === 'collections' ? 'on' : ''} onClick={() => setMode('collections')}>
             Collections{collections.length ? ` (${collections.length})` : ''}
           </button>
+          <button className={mode === 'missing' ? 'on' : ''} onClick={() => setMode('missing')}>Missing</button>
         </div>
 
-        {mode === 'library' ? (
+        {mode !== 'collections' ? (
           <nav className="sys-list">
             {systems.map((s) => {
               const pct = s.rom_count ? (100 * s.complete_count / s.rom_count) : 0
@@ -206,6 +380,7 @@ export default function App() {
         )}
 
         <div className="foot">
+          <button className="rescan" onClick={() => setSettingsOpen(true)} title="ScreenScraper login & settings">⚙</button>
           <span>{scan ? scan.state : '…'}</span>
           <button className="rescan" onClick={async () => { await api.startScan(false); setScan((s) => ({ ...(s || {}), state: 'running' })) }}
                   disabled={scan && scan.state === 'running'} title="Incremental — only re-reads changed systems">
@@ -217,8 +392,14 @@ export default function App() {
       </aside>
 
       <main className="main">
+        {mode === 'missing' ? (
+          <MissingView systemId={active} systemName={activeSys ? activeSys.display_name : null} flash={flash} />
+        ) : (
+        <>
         {mode === 'collections' && collDetail && (
-          <CollectionHeader detail={collDetail} onRename={renameCollection} onDelete={deleteCollection} onExport={() => setExportOpen(true)} />
+          <CollectionHeader detail={collDetail} onRename={renameCollection} onDelete={deleteCollection} onExport={() => setExportOpen(true)}
+                            activeSystem={collSystem} onPickSystem={setCollSystem}
+                            onRefresh={refreshCollectionMeta} onPrune={pruneCollectionDangling} />
         )}
 
         <div className="toolbar">
@@ -236,6 +417,10 @@ export default function App() {
             <option value="partial">partial</option>
             <option value="missing">missing</option>
           </select>
+          <select className="ctl" value={region} onChange={(e) => setRegion(e.target.value)} title="Filter by region">
+            <option value="">all regions</option>
+            {REGIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+          </select>
           <select className="ctl" value={sort} onChange={(e) => setSort(e.target.value)}>
             <option value="name">A–Z</option>
             <option value="name_desc">Z–A</option>
@@ -246,16 +431,59 @@ export default function App() {
             {VIEWS.map((v) => <button key={v} className={v === view ? 'on' : ''} onClick={() => setView(v)}>{v}</button>)}
           </div>
 
-          {mode === 'library' && activeSys && (
+          {total > 0 && (
+            <button className={`btn sm${selectMode ? ' sel-on' : ''}`}
+                    onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}
+                    title="Select games to delete">
+              {selectMode ? 'Done' : '☑ Select'}
+            </button>
+          )}
+          {!selectMode && mode === 'library' && activeSys && canScrape && (
+            <button className="btn sm ghost" onClick={scrapeSystem} disabled={scrapeBusy}
+                    title="Scrape metadata & art for this whole system from ScreenScraper">⬇ scrape</button>
+          )}
+          {!selectMode && mode === 'library' && activeSys && (
             <button className="btn sm ghost map-btn" onClick={() => setMapOpen(true)} title="Edit this system's frontend mapping">⚙ mapping</button>
           )}
-          {mode === 'library' && (
+          {!selectMode && mode === 'library' && (
             <CuratePicker collections={collections} curateInto={curateInto} setCurateInto={setCurateInto} onNew={newCollection} />
           )}
-          {mode === 'library' && curateInto != null && total > 0 && (
+          {!selectMode && mode === 'library' && curateInto != null && total > 0 && (
             <button className="btn add-all" onClick={bulkAddFiltered}>+ Add all {total}</button>
           )}
         </div>
+
+        {selectMode && (
+          <div className="bulkbar">
+            <span className="bulkbar-n tnum">{selectedIds.size} selected</span>
+            <span className="muted" style={{ fontSize: 13 }}>click games to pick</span>
+            <span style={{ flex: 1 }} />
+            <select className="ctl" value="" disabled={!selectedIds.size}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      if (v === '__new') bulkAddToNewCollection()
+                      else if (v) bulkAddToCollection(Number(v))
+                      e.target.value = ''
+                    }}
+                    title="Add the selected games to a collection">
+              <option value="">+ Add to collection…</option>
+              {collections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              <option value="__new">＋ New collection…</option>
+            </select>
+            {mode === 'library' && canScrape && (
+              <button className="btn sm ghost" onClick={scrapeSelected}
+                      disabled={!selectedIds.size || scrapeBusy}
+                      title="Re-scrape the selected games from ScreenScraper">⬇ Rescrape</button>
+            )}
+            <button className="btn sm ghost" onClick={() => setSelectedIds(new Set(games.map((g) => g.id)))}
+                    disabled={!games.length}
+                    title={hasMore ? `Selects the ${games.length} loaded — load more to reach all ${total}` : 'Select every game'}>
+              Select all{hasMore ? ` (${games.length})` : ''}
+            </button>
+            <button className="btn sm ghost" onClick={() => setSelectedIds(new Set())} disabled={!selectedIds.size}>Clear</button>
+            <button className="btn sm danger solid" onClick={bulkDeleteSelected} disabled={!selectedIds.size}>Delete from disk…</button>
+          </div>
+        )}
 
         <div className="content">
           {games.length === 0 && !loading ? (
@@ -268,15 +496,17 @@ export default function App() {
             <>
               <View games={games} onOpen={openGame} sel={sel} />
               {hasMore && (
-                <div className="more">
+                <div className="more" ref={sentinelRef}>
                   <button onClick={() => setOffset(offset + PAGE)} disabled={loading}>
-                    {loading ? 'loading…' : `load more (${games.length} / ${total})`}
+                    {loading ? `loading… (${games.length} / ${total})` : `load more (${games.length} / ${total})`}
                   </button>
                 </div>
               )}
             </>
           )}
         </div>
+        </>
+        )}
       </main>
 
       {exportOpen && collDetail && (
@@ -285,8 +515,46 @@ export default function App() {
       {mapOpen && active && (
         <MappingEditor systemId={active} onClose={() => setMapOpen(false)} onSaved={loadSystems} />
       )}
-      {openId != null && <GameDrawer gameId={openId} onClose={() => setOpenId(null)} />}
+      {openId != null && (
+        <GameDrawer
+          gameId={openId}
+          onClose={() => setOpenId(null)}
+          canScrape={!!canScrape}
+          scrapeBusy={!!scrapeBusy}
+          onRescrape={(g) => runScrape({ system_id: g.system_id, game_ids: [g.id] }, g.name)}
+          onUpdated={(g) => {
+            setGames((gs) => gs.map((x) => (x.id === g.id
+              ? { ...x, name: g.name, coverage: g.coverage, developer: g.developer,
+                  publisher: g.publisher, genre: g.genre, players: g.players,
+                  releasedate: g.releasedate, region: g.region, has: g.has }
+              : x)))
+            loadSystems()
+          }}
+          onDeleted={(id, res) => {
+            setGames((gs) => gs.filter((g) => g.id !== id))
+            setTotal((t) => Math.max(0, t - 1))
+            loadSystems()
+            if (mode === 'collections' && activeCollection) {
+              api.collection(activeCollection).then(setCollDetail).catch(() => {})
+            }
+            flash(`Deleted “${res?.name || 'game'}” from disk`)
+          }}
+        />
+      )}
+      {settingsOpen && (
+        <SettingsDialog onClose={() => setSettingsOpen(false)}
+                        onSaved={() => { if (active) api.scrapeAvailable(active).then(setScrapeInfo).catch(() => {}) }} />
+      )}
+      {scrapeModal && (
+        <ScrapeStatus status={scrapeStatus} onClose={() => setScrapeModal(false)}
+                      onRestart={(req) => restartScrape(req)} />
+      )}
       {toast && <div className="banner">{toast}</div>}
+      {scrapeBusy && (
+        <button className="banner banner-btn" onClick={() => setScrapeModal(true)}>
+          ⬇ {scrapeStatus.message || 'Scraping…'}{scrapeStatus.state === 'paused' ? ' (paused)' : ''} — details
+        </button>
+      )}
       {scan && scan.state === 'running' && <div className="banner">Scanning library…</div>}
     </div>
   )

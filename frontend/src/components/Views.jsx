@@ -1,6 +1,6 @@
 import React from 'react'
 import { mediaUrl } from '../api.js'
-import { CoveragePill, GapFlags, Thumb, Check, formatSize } from './bits.jsx'
+import { CoveragePill, GapFlags, Thumb, Check, RetryImg, formatSize } from './bits.jsx'
 
 // `sel` = { active: bool, isOn: (game)=>bool, toggle: (game)=>void }
 // When sel.active, each item shows a selection checkbox and a selected style.
@@ -70,7 +70,8 @@ export function BoxartView({ games, onOpen, sel }) {
             <div className="art">
               {s.node}
               {g.has.cover ? (
-                <img src={mediaUrl(g.id, 'cover', 320)} loading="lazy" alt={g.name} />
+                <RetryImg src={mediaUrl(g.id, 'cover', 320)} alt={g.name}
+                          fallback={<span className="noart">{g.name}</span>} />
               ) : (
                 <span className="noart">{g.name}</span>
               )}

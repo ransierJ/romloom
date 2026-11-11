@@ -23,15 +23,67 @@ export const api = {
   scanStatus: () => get('/api/scan/status'),
   startScan: (force = false) => fetch(`/api/scan${force ? '?force=true' : ''}`, { method: 'POST' }),
 
-  games(systemId, { search = '', coverage = '', sort = 'name', limit = 100, offset = 0, selectedFor = null } = {}) {
+  games(systemId, { search = '', coverage = '', region = '', sort = 'name', limit = 100, offset = 0, selectedFor = null } = {}) {
     const p = new URLSearchParams({ sort, limit, offset })
     if (search) p.set('search', search)
     if (coverage) p.set('coverage', coverage)
+    if (region) p.set('region', region)
     if (selectedFor != null) p.set('selected_for', selectedFor)
     return get(`/api/systems/${encodeURIComponent(systemId)}/games?${p}`)
   },
 
   game: (id) => get(`/api/games/${id}`),
+
+  getSettings: () => get('/api/settings'),
+  patchSettings: (body) => send('/api/settings', 'PATCH', body),
+  scrapeAvailable: (systemId) => get(`/api/scrape/available${systemId ? `?system_id=${encodeURIComponent(systemId)}` : ''}`),
+  startScrape: (body) => send('/api/scrape', 'POST', body),
+  scrapeStatus: () => get('/api/scrape/status'),
+  scrapeStop: () => send('/api/scrape/stop', 'POST'),
+  scrapePause: () => send('/api/scrape/pause', 'POST'),
+  scrapeResume: () => send('/api/scrape/resume', 'POST'),
+  editMetadata: (id, fields) => send(`/api/games/${id}/metadata`, 'PATCH', fields),
+  async uploadMedia(id, asset, file) {
+    const fd = new FormData()
+    fd.append('file', file)
+    const res = await fetch(`/api/games/${id}/media/${asset}`, { method: 'POST', body: fd })
+    if (!res.ok) { const e = new Error(`${res.status}`); e.status = res.status; throw e }
+    return res.json()
+  },
+
+  missing(systemId, { region = 'USA', search = '', limit = 500, offset = 0 } = {}) {
+    const p = new URLSearchParams({ region, limit, offset })
+    if (search) p.set('search', search)
+    return get(`/api/systems/${encodeURIComponent(systemId)}/missing?${p}`)
+  },
+  refreshCatalog: (systemId) => send(`/api/systems/${encodeURIComponent(systemId)}/catalog/refresh`, 'POST'),
+
+  // Permanent delete from disk — surfaces the server's detail (e.g. read-only).
+  async deleteGame(id) {
+    const res = await fetch(`/api/games/${id}`, { method: 'DELETE' })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      const err = new Error(body.detail || `${res.status} ${res.statusText}`)
+      err.status = res.status
+      throw err
+    }
+    return res.json()
+  },
+
+  async bulkDelete(ids) {
+    const res = await fetch('/api/games/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      const err = new Error(body.detail || `${res.status} ${res.statusText}`)
+      err.status = res.status
+      throw err
+    }
+    return res.json()
+  },
 
   // ---- collections ----
   collections: () => get('/api/collections'),
@@ -40,6 +92,9 @@ export const api = {
   patchCollection: (id, body) => send(`/api/collections/${id}`, 'PATCH', body),
   deleteCollection: (id) => send(`/api/collections/${id}`, 'DELETE'),
   addGames: (id, games) => send(`/api/collections/${id}/add`, 'POST', { games }),
+  addGamesByIds: (id, ids) => send(`/api/collections/${id}/add-ids`, 'POST', { ids }),
+  refreshCollection: (id) => send(`/api/collections/${id}/refresh`, 'POST'),
+  pruneCollection: (id) => send(`/api/collections/${id}/prune`, 'POST'),
   removeGames: (id, games) => send(`/api/collections/${id}/remove`, 'POST', { games }),
   addByQuery: (id, q) => send(`/api/collections/${id}/add-query`, 'POST', q),
 
@@ -56,10 +111,11 @@ export const api = {
   systemMapping: (sid) => get(`/api/systems/${encodeURIComponent(sid)}/mapping`),
   patchSystemMapping: (sid, body) => send(`/api/systems/${encodeURIComponent(sid)}/mapping`, 'PATCH', body),
 
-  collectionGames(id, { search = '', coverage = '', sort = 'name', system = '', limit = 100, offset = 0 } = {}) {
+  collectionGames(id, { search = '', coverage = '', region = '', sort = 'name', system = '', limit = 100, offset = 0 } = {}) {
     const p = new URLSearchParams({ sort, limit, offset })
     if (search) p.set('search', search)
     if (coverage) p.set('coverage', coverage)
+    if (region) p.set('region', region)
     if (system) p.set('system', system)
     return get(`/api/collections/${id}/games?${p}`)
   },

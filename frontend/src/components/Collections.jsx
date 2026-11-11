@@ -26,10 +26,12 @@ export function CuratePicker({ collections, curateInto, setCurateInto, onNew }) 
 }
 
 // Header for the Collections page: name (editable), stats, actions.
-export function CollectionHeader({ detail, onRename, onDelete, onExport }) {
+export function CollectionHeader({ detail, onRename, onDelete, onExport, activeSystem, onPickSystem, onRefresh, onPrune }) {
   const [editing, setEditing] = React.useState(false)
   const [name, setName] = React.useState(detail.name)
+  const [busy, setBusy] = React.useState(null)
   React.useEffect(() => { setName(detail.name) }, [detail.id, detail.name])
+  const run = async (key, fn) => { setBusy(key); try { await fn() } finally { setBusy(null) } }
 
   const cov = detail.coverage || { complete: 0, partial: 0, missing: 0 }
   const resolved = detail.resolved || 0
@@ -48,6 +50,10 @@ export function CollectionHeader({ detail, onRename, onDelete, onExport }) {
           <h1 onClick={() => setEditing(true)} title="Click to rename">{detail.name}</h1>
         )}
         <div className="chead-actions">
+          <button className="btn sm ghost" onClick={() => run('refresh', onRefresh)} disabled={!!busy || !resolved}
+                  title="Re-read metadata & art from the library so the export is current">
+            {busy === 'refresh' ? 'refreshing…' : '↻ refresh'}
+          </button>
           <button className="btn sm primary" onClick={onExport} disabled={!detail.game_count}>Export →</button>
           <button className="btn sm danger" onClick={onDelete}>delete</button>
         </div>
@@ -70,6 +76,11 @@ export function CollectionHeader({ detail, onRename, onDelete, onExport }) {
           {dangling > 0 && (
             <span className="stat missing" title="In the collection but the ROM isn't currently on disk">
               <span className="d" />{dangling} unresolved
+              <button className="chip clear" style={{ marginLeft: 8 }} disabled={!!busy}
+                      onClick={() => run('prune', onPrune)}
+                      title="Remove entries whose ROM is no longer in the library">
+                {busy === 'prune' ? 'cleaning…' : 'clean'}
+              </button>
             </span>
           )}
         </div>
@@ -78,8 +89,18 @@ export function CollectionHeader({ detail, onRename, onDelete, onExport }) {
       {detail.systems?.length > 0 && (
         <div className="chead-systems">
           {detail.systems.map((s) => (
-            <span key={s.system_id} className="chip">{s.display_name} <b className="tnum">{s.n}</b></span>
+            <button
+              key={s.system_id}
+              className={`chip${activeSystem === s.system_id ? ' on' : ''}`}
+              onClick={() => onPickSystem(activeSystem === s.system_id ? null : s.system_id)}
+              title={activeSystem === s.system_id ? 'Show all systems' : `Show only ${s.display_name}`}
+            >
+              {s.display_name} <b className="tnum">{s.n}</b>
+            </button>
           ))}
+          {activeSystem && (
+            <button className="chip clear" onClick={() => onPickSystem(null)}>✕ all systems</button>
+          )}
         </div>
       )}
     </div>

@@ -225,6 +225,25 @@ def _build_system(plan: Plan, system_id: str, grows: list, target: str, assets: 
         plan.rom_count += 1
         plan.systems[first["display_name"]] = plan.systems.get(first["display_name"], 0) + 1
 
+        # MAME CHD companion: a sibling folder named like the romset carries the
+        # game's disk image (calspeed.zip + calspeed/calspeed.chd). Ship it beside
+        # the ROM so disk-based arcade games actually boot on the target.
+        if not is_dir:
+            companion = config.ROMS_ROOT / folder / stem
+            if companion.is_dir():
+                plan.copies.append(FileOp(str(companion),
+                                          f"{root}/{rom_dir_rel}/{stem}",
+                                          _dir_size(companion), True))
+
+        # Disc tracks: a .cue/.gdi is just a text pointer to .bin/.img track
+        # files that must ship with it, or the game won't mount. (They're hidden
+        # from the library listing but still need exporting.)
+        if not is_dir and os.path.splitext(rom_filename)[1].lower() in config.CUESHEET_EXTENSIONS:
+            for track in _cue_tracks(rom_src, config.ROMS_ROOT / folder):
+                tsrc = config.ROMS_ROOT / folder / track
+                plan.copies.append(FileOp(str(tsrc), f"{root}/{rom_dir_rel}/{track}",
+                                          _safe_size(tsrc)))
+
         # Image media per asset, placed/renamed per target.
         media_rel: Dict[str, str] = {}
         for asset in assets:
@@ -270,6 +289,35 @@ def _build_system(plan: Plan, system_id: str, grows: list, target: str, assets: 
 
     if gamelist_rel and entries:
         plan.writes.append(WriteOp(f"{root}/{gamelist_rel}", _gamelist_xml(entries)))
+
+
+_CUE_FILE_RE = re.compile(r'FILE\s+"([^"]+)"', re.IGNORECASE)
+_CUE_TRACK_RE = re.compile(r'(\S+\.(?:bin|img|raw|iso))', re.IGNORECASE)
+
+
+def _cue_tracks(cue_path: Path, folder: Path) -> list:
+    """Track files a .cue/.gdi references, resolved to their REAL on-disk names.
+    Cue references can carry Windows paths or odd casing, so match the referenced
+    basenames (normalized) against the actual files in the folder."""
+    try:
+        text = cue_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return []
+    refs = set()
+    for m in _CUE_FILE_RE.finditer(text):
+        refs.add(os.path.basename(m.group(1).replace("\\", "/")).strip().lower())
+    for m in _CUE_TRACK_RE.finditer(text):
+        refs.add(os.path.basename(m.group(1).strip('"').replace("\\", "/")).strip().lower())
+    if not refs:
+        return []
+    out = []
+    try:
+        for e in os.scandir(folder):
+            if e.is_file() and e.name.lower() in refs:
+                out.append(e.name)
+    except OSError:
+        pass
+    return out
 
 
 def _safe_size(p: Path) -> int:
@@ -409,6 +457,8 @@ def _place_dir(src: Path, dst: Path, mode: str, prog: Progress) -> None:
         target_dir = dst / rel if rel != "." else dst
         target_dir.mkdir(parents=True, exist_ok=True)
         for f in files:
+            if f.startswith("."):
+                continue  # skip macOS AppleDouble (._*) and other dotfile junk
             s = Path(root) / f
             _place_file(s, target_dir / f, _safe_size(s), mode, prog)
 

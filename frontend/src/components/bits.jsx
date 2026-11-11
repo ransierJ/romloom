@@ -19,6 +19,7 @@ export function GapFlags({ has }) {
   if (!has.metadata) gaps.push(['no metadata', false])
   if (!has.wheel) gaps.push(['no wheel', true])
   if (!has.marquee) gaps.push(['no marquee', true])
+  if (!has.video) gaps.push(['no video', true])
   if (gaps.length === 0) return <span className="stat complete"><span className="d" />complete</span>
   return (
     <>
@@ -29,22 +30,40 @@ export function GapFlags({ has }) {
   )
 }
 
+// An <img> that retries on error (with backoff + cache-bust) before giving up.
+// The media exists — a failure is almost always a transient timeout while the
+// backend resizes the source off a busy NAS — so retrying recovers it.
+export function RetryImg({ src, alt = '', className, loading = 'lazy', maxRetries = 6, fallback = null }) {
+  const [attempt, setAttempt] = React.useState(0)
+  const [dead, setDead] = React.useState(false)
+  React.useEffect(() => { setAttempt(0); setDead(false) }, [src])
+  if (dead) return fallback
+  const url = attempt ? `${src}${src.includes('?') ? '&' : '?'}r=${attempt}` : src
+  return (
+    <img
+      className={className}
+      src={url}
+      alt={alt}
+      loading={loading}
+      onError={() => {
+        if (attempt < maxRetries) {
+          window.setTimeout(() => setAttempt((a) => a + 1), 400 * (attempt + 1))
+        } else {
+          setDead(true)
+        }
+      }}
+    />
+  )
+}
+
 // A single media thumbnail that gracefully shows a placeholder when absent.
 export function Thumb({ gameId, asset, w = 200, wide = false, has = true, label }) {
-  const [failed, setFailed] = React.useState(false)
-  const show = has && !failed
+  const placeholder = <span className="x">{label || 'none'}</span>
   return (
     <div className={`thumb${wide ? ' wide' : ''}`}>
-      {show ? (
-        <img
-          src={mediaUrl(gameId, asset, w)}
-          loading="lazy"
-          alt=""
-          onError={() => setFailed(true)}
-        />
-      ) : (
-        <span className="x">{label || 'none'}</span>
-      )}
+      {has
+        ? <RetryImg src={mediaUrl(gameId, asset, w)} fallback={placeholder} />
+        : placeholder}
     </div>
   )
 }
