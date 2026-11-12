@@ -22,7 +22,34 @@ from typing import Callable, Dict, List, Optional
 from . import config
 from .scanner import _index_media  # reuse tolerant media-folder resolution
 
-TARGETS = ("raw", "es-de", "batocera", "retrobat")
+TARGETS = ("raw", "es-de", "batocera", "retrobat", "muos", "minui")
+
+# ES-family targets write a gamelist.xml and read <favorite>true</favorite>; this
+# covers Knulli / ROCKNIX / AmberELEC / Batocera handhelds too.
+_ES_TARGETS = ("es-de", "batocera", "retrobat")
+
+# MinUI / NextUI require a (TAG) suffix on each ROM folder that maps to its
+# emulator pak. Unlisted systems fall back to the uppercased canonical id.
+_MINUI_TAG = {
+    "gb": "GB", "gbc": "GBC", "gba": "GBA", "nes": "FC", "snes": "SFC", "n64": "N64",
+    "nds": "NDS", "genesis": "MD", "segacd": "SEGACD", "sega32x": "THIRTYTWOX",
+    "gamegear": "GG", "mastersystem": "SMS", "sg1000": "SG1000", "psx": "PS",
+    "ps2": "PS2", "psp": "PSP", "saturn": "SATURN", "dreamcast": "DC", "tg16": "PCE",
+    "tg16cd": "PCECD", "neogeo": "NEOGEO", "neogeocd": "NEOGEOCD", "ngp": "NGP",
+    "ngpc": "NGPC", "wonderswan": "WS", "wonderswancolor": "WSC", "atarilynx": "LYNX",
+    "atari2600": "ATARI", "atari7800": "SEVENTYEIGHThundred", "arcade": "ARCADE",
+    "fbneo": "FBNEO", "gc": "GC", "wii": "WII", "pokemini": "PKM", "virtualboy": "VB",
+    "colecovision": "COLECO", "intellivision": "INTV", "vectrex": "VECTREX", "msx": "MSX",
+    "c64": "C64", "amiga": "AMIGA", "dos": "DOS", "pico8": "PICO",
+}
+
+
+def _minui_tag(row) -> str:
+    return _MINUI_TAG.get(row["system_id"], row["system_id"].upper())
+
+
+def _minui_dir(row) -> str:
+    return f"Roms/{sanitize(row['display_name'])} ({_minui_tag(row)})"
 
 # Skyscraper asset key -> its source media sub-folder (canonical name).
 _SKY_DIR = {"cover": "covers", "screenshot": "screenshots",
@@ -159,10 +186,12 @@ def build_plan(conn, collection_id: int, target: str,
         raise ValueError("Unknown collection")
 
     rows = conn.execute(
-        "SELECT g.*, s.folder, s.display_name, s.es_id, s.batocera_id, s.retrobat_id "
+        "SELECT g.*, s.folder, s.display_name, s.es_id, s.batocera_id, s.retrobat_id, "
+        "u.favorite AS u_favorite "
         "FROM collection_games cg "
         "JOIN games g ON g.system_id=cg.system_id AND g.rom_filename=cg.rom_filename "
         "JOIN systems s ON s.id = cg.system_id "
+        "LEFT JOIN game_user_data u ON u.system_id=cg.system_id AND u.rom_filename=cg.rom_filename "
         "WHERE cg.collection_id = ? ORDER BY s.display_name, g.name COLLATE NOCASE",
         (collection_id,),
     ).fetchall()
@@ -178,7 +207,34 @@ def build_plan(conn, collection_id: int, target: str,
     for system_id, grows in by_system.items():
         _build_system(plan, system_id, grows, target, assets)
 
+    _emit_handheld_collections(plan, target, rows, coll["name"])
     return plan
+
+
+def _emit_handheld_collections(plan: Plan, target: str, rows: list, coll_name: str):
+    """muOS / MinUI browse by folder, so a collection + favourites are separate
+    text files of ROM paths. (ES-family targets carry favourites in the gamelist
+    instead.)"""
+    favs = [r for r in rows if r["u_favorite"]]
+    root = plan.root_rel
+    cname = sanitize(coll_name)
+    if target == "muos":
+        # One absolute on-device path per line (default SD1 mount).
+        def p(r):
+            return f"/mnt/mmc/ROMS/{r['folder']}/{r['rom_filename']}"
+        plan.writes.append(WriteOp(f"{root}/MUOS/info/collection/{cname}.cfg",
+                                   "".join(p(r) + "\n" for r in rows)))
+        if favs:
+            plan.writes.append(WriteOp(f"{root}/MUOS/info/collection/Favourite.cfg",
+                                       "".join(p(r) + "\n" for r in favs)))
+    elif target == "minui":
+        def p(r):
+            return f"/{_minui_dir(r)}/{r['rom_filename']}"
+        plan.writes.append(WriteOp(f"{root}/Collections/{cname}.txt",
+                                   "".join(p(r) + "\n" for r in rows)))
+        if favs:
+            plan.writes.append(WriteOp(f"{root}/Collections/Favorites.txt",
+                                       "".join(p(r) + "\n" for r in favs)))
 
 
 def _target_paths(target: str, row) -> tuple:
@@ -195,6 +251,13 @@ def _target_paths(target: str, row) -> tuple:
         return bato, f"{bato}/images", f"{bato}/gamelist.xml"
     if target == "retrobat":
         return f"roms/{retro}", f"roms/{retro}/images", f"roms/{retro}/gamelist.xml"
+    if target == "muos":
+        # muOS: ROMs under ROMS/<folder>; box art + screenshots live in the
+        # catalogue keyed by the (folder) system name. No gamelist (folder-browsed).
+        return f"ROMS/{folder}", f"MUOS/info/catalogue/{folder}", None
+    if target == "minui":
+        rom = _minui_dir(row)
+        return rom, f"{rom}/.res", None    # art in a .res/ folder beside the ROMs
     raise ValueError(target)
 
 
@@ -339,6 +402,12 @@ def _media_dst(target: str, media_dir_rel: str, asset: str, stem: str,
         if es_type is None:      # Skyscraper's arcade 'marquee' has no ES-DE home
             return None
         return f"{media_dir_rel}/{es_type}/{stem}{ext}"
+    if target == "muos":
+        sub = {"cover": "box", "screenshot": "preview", "wheel": "logo"}.get(asset)
+        return f"{media_dir_rel}/{sub}/{stem}{ext}" if sub else None
+    if target == "minui":
+        # MinUI shows one art per game, in .res/ named by the ROM stem. Cover only.
+        return f"{media_dir_rel}/{stem}{ext}" if asset == "cover" else None
     # batocera + retrobat: images/<stem>-<suffix>.<ext>, referenced from gamelist.
     suffix = {"screenshot": "image", "cover": "thumb", "wheel": "marquee"}.get(asset)
     if suffix is None:
@@ -372,6 +441,8 @@ def _gamelist_entry(target: str, r, rom_filename: str,
         "genre": r["genre"],
         "players": r["players"],
     }
+    if r["u_favorite"]:
+        entry["favorite"] = "true"      # read by ES-DE + all ES-based handhelds
     if target in ("batocera", "retrobat"):
         # The gamelist lives in the system folder; reference media relative to it
         # as "./images/<file>" (matches where _media_dst places them).

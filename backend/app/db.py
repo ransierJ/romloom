@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS collections (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     name          TEXT NOT NULL,
     note          TEXT,
+    rules         TEXT,               -- JSON rule set; non-null = smart collection
     created_epoch INTEGER NOT NULL DEFAULT 0,
     updated_epoch INTEGER NOT NULL DEFAULT 0
 );
@@ -119,6 +120,22 @@ CREATE TABLE IF NOT EXISTS catalog_titles (
 );
 CREATE INDEX IF NOT EXISTS idx_catalog_system ON catalog_titles(system_id);
 
+-- Per-game user data (favorite, rating, completion, tags, notes). Keyed by the
+-- stable natural key — NOT games.id — so it survives the scanner rebuilding the
+-- games table each scan, exactly like collection membership.
+CREATE TABLE IF NOT EXISTS game_user_data (
+    system_id     TEXT NOT NULL,
+    rom_filename  TEXT NOT NULL,
+    favorite      INTEGER NOT NULL DEFAULT 0,
+    rating        REAL,              -- user star rating 0–5 (half steps)
+    status        TEXT,              -- '', playing, beaten, completed, dropped
+    tags          TEXT,              -- comma-separated
+    notes         TEXT,
+    updated_epoch INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (system_id, rom_filename)
+);
+CREATE INDEX IF NOT EXISTS idx_gud_fav ON game_user_data(favorite);
+
 -- One row per system whose catalog has been fetched: when and which DAT version.
 CREATE TABLE IF NOT EXISTS catalog_meta (
     system_id     TEXT PRIMARY KEY,
@@ -140,6 +157,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE games ADD COLUMN video_file TEXT")
     if gcols and "region" not in gcols:
         conn.execute("ALTER TABLE games ADD COLUMN region TEXT")
+    ccols = {r[1] for r in conn.execute("PRAGMA table_info(collections)")}
+    if ccols and "rules" not in ccols:
+        conn.execute("ALTER TABLE collections ADD COLUMN rules TEXT")
 
 
 def connect(db_path: Path | None = None) -> sqlite3.Connection:

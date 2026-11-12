@@ -26,7 +26,7 @@ export function CuratePicker({ collections, curateInto, setCurateInto, onNew }) 
 }
 
 // Header for the Collections page: name (editable), stats, actions.
-export function CollectionHeader({ detail, onRename, onDelete, onExport, activeSystem, onPickSystem, onRefresh, onPrune }) {
+export function CollectionHeader({ detail, onRename, onDelete, onExport, activeSystem, onPickSystem, onRefresh, onPrune, onEditRules }) {
   const [editing, setEditing] = React.useState(false)
   const [name, setName] = React.useState(detail.name)
   const [busy, setBusy] = React.useState(null)
@@ -47,11 +47,16 @@ export function CollectionHeader({ detail, onRename, onDelete, onExport, activeS
             <button type="button" className="btn sm ghost" onClick={() => { setName(detail.name); setEditing(false) }}>cancel</button>
           </form>
         ) : (
-          <h1 onClick={() => setEditing(true)} title="Click to rename">{detail.name}</h1>
+          <h1 onClick={() => setEditing(true)} title="Click to rename">
+            {detail.smart && <span className="smart-badge" title="Smart collection">⚡ smart</span>}{detail.name}
+          </h1>
         )}
         <div className="chead-actions">
-          <button className="btn sm ghost" onClick={() => run('refresh', onRefresh)} disabled={!!busy || !resolved}
-                  title="Re-read metadata & art from the library so the export is current">
+          {detail.smart && (
+            <button className="btn sm ghost" onClick={onEditRules} title="Edit the rules that populate this collection">⚡ rules</button>
+          )}
+          <button className="btn sm ghost" onClick={() => run('refresh', onRefresh)} disabled={!!busy || (!resolved && !detail.smart)}
+                  title={detail.smart ? 'Re-evaluate rules + re-read metadata' : 'Re-read metadata & art from the library so the export is current'}>
             {busy === 'refresh' ? 'refreshing…' : '↻ refresh'}
           </button>
           <button className="btn sm primary" onClick={onExport} disabled={!detail.game_count}>Export →</button>

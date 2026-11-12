@@ -23,14 +23,17 @@ export const api = {
   scanStatus: () => get('/api/scan/status'),
   startScan: (force = false) => fetch(`/api/scan${force ? '?force=true' : ''}`, { method: 'POST' }),
 
-  games(systemId, { search = '', coverage = '', region = '', sort = 'name', limit = 100, offset = 0, selectedFor = null } = {}) {
+  games(systemId, { search = '', coverage = '', region = '', genre = '', favorite = false, sort = 'name', limit = 100, offset = 0, selectedFor = null } = {}) {
     const p = new URLSearchParams({ sort, limit, offset })
     if (search) p.set('search', search)
     if (coverage) p.set('coverage', coverage)
     if (region) p.set('region', region)
+    if (genre) p.set('genre', genre)
+    if (favorite) p.set('favorite', 'true')
     if (selectedFor != null) p.set('selected_for', selectedFor)
     return get(`/api/systems/${encodeURIComponent(systemId)}/games?${p}`)
   },
+  genres: (systemId) => get(`/api/systems/${encodeURIComponent(systemId)}/genres`),
 
   game: (id) => get(`/api/games/${id}`),
 
@@ -43,6 +46,7 @@ export const api = {
   scrapePause: () => send('/api/scrape/pause', 'POST'),
   scrapeResume: () => send('/api/scrape/resume', 'POST'),
   editMetadata: (id, fields) => send(`/api/games/${id}/metadata`, 'PATCH', fields),
+  setUserData: (id, fields) => send(`/api/games/${id}/user`, 'PATCH', fields),
   async uploadMedia(id, asset, file) {
     const fd = new FormData()
     fd.append('file', file)
@@ -88,7 +92,7 @@ export const api = {
   // ---- collections ----
   collections: () => get('/api/collections'),
   collection: (id) => get(`/api/collections/${id}`),
-  createCollection: (name, note) => send('/api/collections', 'POST', { name, note }),
+  createCollection: (name, note, rules) => send('/api/collections', 'POST', { name, note, ...(rules ? { rules } : {}) }),
   patchCollection: (id, body) => send(`/api/collections/${id}`, 'PATCH', body),
   deleteCollection: (id) => send(`/api/collections/${id}`, 'DELETE'),
   addGames: (id, games) => send(`/api/collections/${id}/add`, 'POST', { games }),
@@ -111,11 +115,13 @@ export const api = {
   systemMapping: (sid) => get(`/api/systems/${encodeURIComponent(sid)}/mapping`),
   patchSystemMapping: (sid, body) => send(`/api/systems/${encodeURIComponent(sid)}/mapping`, 'PATCH', body),
 
-  collectionGames(id, { search = '', coverage = '', region = '', sort = 'name', system = '', limit = 100, offset = 0 } = {}) {
+  collectionGames(id, { search = '', coverage = '', region = '', genre = '', favorite = false, sort = 'name', system = '', limit = 100, offset = 0 } = {}) {
     const p = new URLSearchParams({ sort, limit, offset })
     if (search) p.set('search', search)
     if (coverage) p.set('coverage', coverage)
     if (region) p.set('region', region)
+    if (genre) p.set('genre', genre)
+    if (favorite) p.set('favorite', 'true')
     if (system) p.set('system', system)
     return get(`/api/collections/${id}/games?${p}`)
   },

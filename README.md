@@ -24,11 +24,14 @@ container on a NAS.
 
 - **Per-system library**, one console at a time, with real ROM counts and a
   coverage bar per system.
-- **Search** within a system, **filter** by coverage (complete / partial /
-  missing) and by **region** (USA, Europe, Japan, …), and **sort** (A–Z, Z–A,
-  top-rated, least-complete).
+- **Search** within a system, **filter** by coverage, **region**, **genre**, and
+  **favorites**, and **sort** (A–Z, Z–A, favorites-first, your rating, top-rated,
+  newest/oldest, least-complete).
 - **Four views:** List, Details, Boxart grid, and **Gaps** — name + boxart +
   screenshot + exactly which assets are missing.
+- **Make it yours:** mark **favorites** (a heart on every card), set a personal
+  **star rating**, a **completion status**, **tags**, and **notes** — all of it
+  survives rescans.
 - **Infinite scroll** with lazy-loaded images, and **thumbnails pre-generated
   during the scan**, so a 3,000-game boxart wall stays fast without hammering
   the NAS.
@@ -41,6 +44,9 @@ container on a NAS.
   hacks, translations, obscure dumps).
 - **"Missing ROMs"** view that diffs your library against the complete No-Intro /
   Redump catalogs to show what you're missing.
+- **Collections**, both hand-picked and **smart** (rule-based, auto-populated and
+  kept current), exported for desktop frontends *and* handhelds (muOS, MinUI,
+  Knulli/ROCKNIX/AmberELEC…) with each device's native favorites file.
 - **Delete from disk** (single or bulk) and **multi-select** to bulk-add into
   collections.
 
@@ -115,10 +121,17 @@ Curate device-specific sets without touching the library:
   library toolbar — checkboxes then appear on every game.
 - Tick individual games, use **☑ Select** mode to bulk-add a multi-selection, or
   **Add all N** matching the current system + search + coverage filter.
+- **Smart collections** (⚡ *New smart collection*) populate themselves from a
+  rule set — systems, genre, region, coverage, favorites, completion status,
+  minimum rating, title contains — combined with AND (OR within a multi-value
+  field). They re-evaluate on every scan, on **↻ refresh**, and whenever you edit
+  the rules, so "all my USA favorites" or "SNES games I've beaten, 4★+" stays
+  current on its own.
 - The **Collections** page shows a collection's stats (game count, systems, size,
   coverage) and its games in all four views. Click a **system chip** to filter to
-  that console; **↻ refresh** re-reads metadata/art from disk so an export is
-  current; **clean** prunes entries whose ROM is no longer in the library.
+  that console; **↻ refresh** re-reads metadata/art from disk (and re-evaluates a
+  smart collection's rules) so an export is current; **clean** prunes entries
+  whose ROM is no longer in the library.
 - Membership is keyed by `(system, rom filename)`, so it **survives rescans**
   even though game rows are rebuilt each scan.
 
@@ -139,11 +152,17 @@ Each target is written under `OUTPUT_ROOT/<collection>/<target>/`:
 | **ES-DE** | `ROMs/<sys>/<rom>` | `downloaded_media/<sys>/{covers,screenshots,marquees}/<stem>.png` | `ROMs/<sys>/gamelist.xml` |
 | **Batocera** | `<sys>/<rom>` | `<sys>/images/<stem>-{image,thumb,marquee}.png` | `<sys>/gamelist.xml` |
 | **Retrobat** | `roms/<sys>/<rom>` | `roms/<sys>/images/<stem>-…` | `roms/<sys>/gamelist.xml` |
+| **muOS** | `ROMS/<sys>/<rom>` | `MUOS/info/catalogue/<sys>/{box,preview}/<stem>.png` | collection + `Favourite.cfg` |
+| **MinUI / NextUI** | `Roms/<Name> (TAG)/<rom>` | `…/.res/<stem>.png` | `Collections/*.txt` favorites |
 
 - `<sys>` is translated from your folder name via the platform map
   (`Nintendo - Super Nintendo…` → `snes`); edit it per-system with **⚙ mapping**.
 - Media is remapped per target, and **gameplay videos** ship when present
   (`video` toggle, on by default).
+- **Favorites travel with the export:** ES-family targets (ES-DE, Batocera,
+  Retrobat — and therefore Knulli / ROCKNIX / AmberELEC handhelds) mark favorited
+  games `<favorite>true</favorite>` in the gamelist; muOS and MinUI get their own
+  native favorites/collection files.
 - **Disc & arcade companions travel with the game:** a `.cue`/`.gdi` brings its
   `.bin`/`.img` tracks, a MAME romset brings its sibling `.chd` folder, and disc
   games stored as folders are copied whole.

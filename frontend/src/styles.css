@@ -376,3 +376,43 @@ select.ctl { border:1px solid var(--line); background:var(--surface-2); color:va
 .pbar .fill.running { background:linear-gradient(90deg, var(--accent), var(--accent-ink)); }
 .pmeta { margin-top:6px; font-size:12px; color:var(--ink-faint); }
 .banner-btn { cursor:pointer; border:none; font:inherit; }
+
+/* ---------- Favorites, ratings, user data ---------- */
+.fav {
+  border:none; background:rgba(0,0,0,.35); color:#fff; cursor:pointer; line-height:1;
+  border-radius:999px; width:26px; height:26px; font-size:14px; display:grid; place-items:center;
+  opacity:0; transition:opacity .12s, color .12s, transform .1s;
+}
+.art { position:relative; }
+.art .fav { position:absolute; top:6px; right:6px; z-index:2; }
+.cardb:hover .fav, .fav.on { opacity:1; }
+.fav.on { color:#e8617a; }
+.fav:hover { transform:scale(1.12); }
+.fav.lg { position:static; opacity:1; width:34px; height:34px; font-size:18px; background:var(--surface-3); color:var(--ink-faint); }
+.fav.lg.on { color:#e8617a; }
+@media (hover: none) { .cardb .fav { opacity:1; } }
+
+.userdata { display:flex; flex-direction:column; gap:10px; margin-top:16px; padding-top:14px; border-top:1px solid var(--line-soft); }
+.ud-row { display:flex; align-items:center; gap:12px; }
+.stars { display:flex; gap:2px; }
+.stars .star { border:none; background:none; cursor:pointer; font-size:20px; line-height:1; color:var(--line); padding:0; transition:color .1s; }
+.stars .star.on { color:var(--accent); }
+.stars .star:hover { color:var(--accent-ink); }
+.ud-tags, .ud-notes {
+  font:inherit; font-size:13px; color:var(--ink); background:var(--surface-2);
+  border:1px solid var(--line); border-radius:6px; padding:6px 9px; width:100%; resize:vertical;
+}
+.ud-tags:focus, .ud-notes:focus { outline:2px solid var(--accent); outline-offset:0; border-color:transparent; }
+
+.btn.fav-filter { font-size:14px; line-height:1; padding:5px 10px; color:var(--ink-faint); }
+.btn.fav-filter.on { color:#e8617a; border-color:#e8617a; background:var(--missing-wash); }
+
+/* ---------- Smart collections ---------- */
+.smart-ic { margin-right:4px; color:var(--accent); font-size:11px; }
+.smart-badge { font-family:var(--mono); font-size:11px; color:var(--accent-ink); background:var(--accent-wash); border:1px solid var(--accent-soft); padding:2px 7px; border-radius:999px; margin-right:8px; vertical-align:middle; }
+.smart-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px; }
+.smart-check { display:flex; align-items:center; gap:8px; margin-top:12px; font-size:13px; color:var(--ink-soft); cursor:pointer; }
+.smart-systems { display:flex; flex-wrap:wrap; gap:6px; max-height:140px; overflow-y:auto; padding:8px; background:var(--surface-2); border:1px solid var(--line); border-radius:8px; margin:4px 0; }
+.smart-systems .chip { font-family:var(--mono); font-size:11px; padding:3px 9px; border-radius:999px; background:var(--surface-3); border:1px solid var(--line); color:var(--ink-soft); cursor:pointer; }
+.smart-systems .chip.on { background:var(--accent-wash); border-color:var(--accent-soft); color:var(--accent-ink); }
+@media (max-width:520px){ .smart-grid { grid-template-columns:1fr; } }

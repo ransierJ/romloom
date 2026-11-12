@@ -8,6 +8,7 @@ import MappingEditor from './components/MappingEditor.jsx'
 import MissingView from './components/MissingView.jsx'
 import SettingsDialog from './components/SettingsDialog.jsx'
 import ScrapeStatus from './components/ScrapeStatus.jsx'
+import SmartCollectionDialog from './components/SmartCollectionDialog.jsx'
 
 const VIEWS = ['List', 'Details', 'Boxart', 'Gaps']
 const PAGE = 100
@@ -34,6 +35,9 @@ export default function App() {
   const [search, setSearch] = React.useState('')
   const [coverage, setCoverage] = React.useState('')
   const [region, setRegion] = React.useState('')
+  const [genre, setGenre] = React.useState('')
+  const [onlyFav, setOnlyFav] = React.useState(false)
+  const [genreList, setGenreList] = React.useState([])
   const [sort, setSort] = React.useState('name')
 
   const [collections, setCollections] = React.useState([])
@@ -41,6 +45,7 @@ export default function App() {
   const [activeCollection, setActiveCollection] = React.useState(initial.get('collection') ? Number(initial.get('collection')) : null)
   const [collDetail, setCollDetail] = React.useState(null)
   const [collSystem, setCollSystem] = React.useState(null)   // filter a collection to one system
+  const [smartDialog, setSmartDialog] = React.useState(null) // null | {} (new) | {id,name,rules} (edit)
 
   const [games, setGames] = React.useState([])
   const [total, setTotal] = React.useState(0)
@@ -94,19 +99,24 @@ export default function App() {
   }, [])
 
   // Reset paging on any query change.
-  React.useEffect(() => { setOffset(0) }, [mode, active, activeCollection, dSearch, coverage, region, sort, curateInto, collSystem])
+  React.useEffect(() => { setOffset(0) }, [mode, active, activeCollection, dSearch, coverage, region, genre, onlyFav, sort, curateInto, collSystem])
 
   // A system filter only applies within one collection — clear it on switch.
   React.useEffect(() => { setCollSystem(null) }, [activeCollection, mode])
 
-  // Changing system clears a region filter that may not apply to the new system.
-  React.useEffect(() => { setRegion('') }, [active])
+  // Changing system clears region/genre filters that may not apply, and loads
+  // the new system's genre facet for the dropdown.
+  React.useEffect(() => {
+    setRegion(''); setGenre('')
+    if (active) api.genres(active).then(setGenreList).catch(() => setGenreList([]))
+    else setGenreList([])
+  }, [active])
 
   // Fetch a page for whichever mode is active.
   React.useEffect(() => {
     if (mode === 'missing') return   // Missing view fetches its own data
     let alive = true
-    const opts = { search: dSearch, coverage, region: region || null, sort, limit: PAGE, offset }
+    const opts = { search: dSearch, coverage, region: region || null, genre: genre || null, favorite: onlyFav, sort, limit: PAGE, offset }
     let req
     if (mode === 'collections') {
       if (!activeCollection) { setGames([]); setTotal(0); return }
@@ -123,7 +133,7 @@ export default function App() {
     }).catch(() => { if (alive) { setGames([]); setTotal(0) } })
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
-  }, [mode, active, activeCollection, dSearch, coverage, region, sort, offset, curateInto, collSystem, reloadKey])
+  }, [mode, active, activeCollection, dSearch, coverage, region, genre, onlyFav, sort, offset, curateInto, collSystem, reloadKey])
 
   // Collection detail for the Collections page header.
   React.useEffect(() => {
@@ -197,6 +207,20 @@ export default function App() {
     forceReload()          // re-fetch to light up the checkboxes
     loadCollections()
     flash(`Added ${n} to “${label}” — ${d.game_count} games total`)
+  }
+
+  const saveSmart = async (name, rules, editId) => {
+    try {
+      const d = editId
+        ? await api.patchCollection(editId, { name, rules })
+        : await api.createCollection(name, null, rules)
+      await loadCollections()
+      setSmartDialog(null)
+      setMode('collections'); setActiveCollection(d.id); setCollDetail(d)
+      if (editId) forceReload()
+      flash(editId ? `Updated “${d.name}” — ${d.game_count} games`
+        : `Created “${d.name}” — ${d.game_count} games`)
+    } catch { flash('Save failed') }
   }
 
   const renameCollection = async (name) => {
@@ -340,11 +364,19 @@ export default function App() {
 
   const openGame = (g) => (selectMode ? toggleSelected(g.id) : setOpenId(g.id))
 
+  const toggleFavorite = async (g) => {
+    const next = !(g.user && g.user.favorite)
+    const apply = (fav) => setGames((gs) => gs.map((x) => (x.id === g.id
+      ? { ...x, user: { ...(x.user || {}), favorite: fav } } : x)))
+    apply(next)
+    try { await api.setUserData(g.id, { favorite: next }) } catch { apply(!next) }
+  }
+
   return (
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
-          <span className="mark">🕹</span><b>ROMFORGE</b><span className="ver">v0.7.7</span>
+          <span className="mark">🕹</span><b>ROMFORGE</b><span className="ver">v0.9.0</span>
         </div>
         <div className="tabs">
           <button className={mode === 'library' ? 'on' : ''} onClick={() => setMode('library')}>Systems</button>
@@ -371,10 +403,11 @@ export default function App() {
           <nav className="sys-list">
             {collections.map((c) => (
               <button key={c.id} className={`sys${c.id === activeCollection ? ' active' : ''}`} onClick={() => setActiveCollection(c.id)}>
-                <span className="row1"><span className="nm">{c.name}</span><span className="ct tnum">{c.game_count}</span></span>
+                <span className="row1"><span className="nm">{c.smart && <span className="smart-ic" title="Smart collection">⚡</span>}{c.name}</span><span className="ct tnum">{c.game_count}</span></span>
               </button>
             ))}
             <button className="newcoll" onClick={newCollection}>+ New collection</button>
+            <button className="newcoll" onClick={() => setSmartDialog({})}>⚡ New smart collection</button>
             {collections.length === 0 && <p className="side-empty">No collections yet.</p>}
           </nav>
         )}
@@ -399,7 +432,8 @@ export default function App() {
         {mode === 'collections' && collDetail && (
           <CollectionHeader detail={collDetail} onRename={renameCollection} onDelete={deleteCollection} onExport={() => setExportOpen(true)}
                             activeSystem={collSystem} onPickSystem={setCollSystem}
-                            onRefresh={refreshCollectionMeta} onPrune={pruneCollectionDangling} />
+                            onRefresh={refreshCollectionMeta} onPrune={pruneCollectionDangling}
+                            onEditRules={() => setSmartDialog({ id: collDetail.id, name: collDetail.name, rules: collDetail.rules })} />
         )}
 
         <div className="toolbar">
@@ -421,10 +455,23 @@ export default function App() {
             <option value="">all regions</option>
             {REGIONS.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
+          {genreList.length > 0 && (
+            <select className="ctl" value={genre} onChange={(e) => setGenre(e.target.value)} title="Filter by genre">
+              <option value="">all genres</option>
+              {genreList.map((gn) => <option key={gn} value={gn}>{gn}</option>)}
+            </select>
+          )}
+          <button className={`btn sm ghost fav-filter${onlyFav ? ' on' : ''}`}
+                  onClick={() => setOnlyFav((v) => !v)}
+                  title={onlyFav ? 'Showing favorites only' : 'Show favorites only'}>♥</button>
           <select className="ctl" value={sort} onChange={(e) => setSort(e.target.value)}>
             <option value="name">A–Z</option>
             <option value="name_desc">Z–A</option>
+            <option value="favorite">favorites first</option>
+            <option value="myrating">my rating</option>
             <option value="rating">top rated</option>
+            <option value="year">newest</option>
+            <option value="year_asc">oldest</option>
             <option value="coverage">least complete</option>
           </select>
           <div className="views">
@@ -494,7 +541,7 @@ export default function App() {
             </div>
           ) : (
             <>
-              <View games={games} onOpen={openGame} sel={sel} />
+              <View games={games} onOpen={openGame} sel={sel} onFavorite={toggleFavorite} />
               {hasMore && (
                 <div className="more" ref={sentinelRef}>
                   <button onClick={() => setOffset(offset + PAGE)} disabled={loading}>
@@ -526,7 +573,7 @@ export default function App() {
             setGames((gs) => gs.map((x) => (x.id === g.id
               ? { ...x, name: g.name, coverage: g.coverage, developer: g.developer,
                   publisher: g.publisher, genre: g.genre, players: g.players,
-                  releasedate: g.releasedate, region: g.region, has: g.has }
+                  releasedate: g.releasedate, region: g.region, has: g.has, user: g.user }
               : x)))
             loadSystems()
           }}
@@ -540,6 +587,10 @@ export default function App() {
             flash(`Deleted “${res?.name || 'game'}” from disk`)
           }}
         />
+      )}
+      {smartDialog && (
+        <SmartCollectionDialog systems={systems} initial={smartDialog.id ? smartDialog : null}
+                               onClose={() => setSmartDialog(null)} onSave={saveSmart} />
       )}
       {settingsOpen && (
         <SettingsDialog onClose={() => setSettingsOpen(false)}

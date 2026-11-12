@@ -71,6 +71,10 @@ export default function GameDrawer({ gameId, onClose, onDeleted, onUpdated, onRe
     }
   }
 
+  const patchUser = async (fields) => {
+    try { applyUpdate(await api.setUserData(game.id, fields)) } catch { /* ignore */ }
+  }
+
   const uploadArt = async (asset, file) => {
     if (!file) return
     setUploading(asset); setEditError(null)
@@ -205,6 +209,32 @@ export default function GameDrawer({ gameId, onClose, onDeleted, onUpdated, onRe
                 <span className="flag" style={g.has.metadata ? { background: 'var(--ok-wash)', color: 'var(--ok)' } : undefined}>
                   {g.has.metadata ? '✓ metadata' : '✕ metadata'}
                 </span>
+              </div>
+
+              <div className="userdata">
+                <div className="ud-row">
+                  <button className={`fav lg${g.user?.favorite ? ' on' : ''}`}
+                          title={g.user?.favorite ? 'Remove favorite' : 'Mark favorite'}
+                          onClick={() => patchUser({ favorite: !g.user?.favorite })}>♥</button>
+                  <div className="stars" title="Your rating">
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <button key={n} className={`star${(g.user?.rating || 0) >= n ? ' on' : ''}`}
+                              onClick={() => patchUser({ rating: g.user?.rating === n ? 0 : n })}>★</button>
+                    ))}
+                  </div>
+                  <select className="ctl" value={g.user?.status || ''}
+                          onChange={(e) => patchUser({ status: e.target.value })}>
+                    <option value="">— status —</option>
+                    <option value="playing">Playing</option>
+                    <option value="beaten">Beaten</option>
+                    <option value="completed">Completed</option>
+                    <option value="dropped">Dropped</option>
+                  </select>
+                </div>
+                <input key={`tags-${gameId}`} className="ud-tags" placeholder="tags (comma-separated)"
+                       defaultValue={g.user?.tags || ''} onBlur={(e) => patchUser({ tags: e.target.value })} />
+                <textarea key={`notes-${gameId}`} className="ud-notes" rows={2} placeholder="your notes…"
+                          defaultValue={g.user?.notes || ''} onBlur={(e) => patchUser({ notes: e.target.value })} />
               </div>
 
               <div className="danger-zone">

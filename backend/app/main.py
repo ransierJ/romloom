@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import errno
 import io
+import json
 import mimetypes
 import os
 import shutil
@@ -54,6 +55,7 @@ def _run_scan(force: bool) -> None:
         conn = db.connect()  # own connection for the worker thread
         scan(conn, force=force)
         conn.close()
+        _resolve_all_smart()   # keep smart collections current with the library
     finally:
         _scanning = False
         _scan_lock.release()
@@ -347,10 +349,25 @@ _SORTS = {
     "name_desc": "g.name COLLATE NOCASE DESC",
     "rating": "g.rating DESC NULLS LAST, g.name COLLATE NOCASE ASC",
     "coverage": "CASE g.coverage WHEN 'missing' THEN 0 WHEN 'partial' THEN 1 ELSE 2 END ASC, g.name COLLATE NOCASE ASC",
+    # These reference the user-data / release columns; every list query joins
+    # game_user_data, so the aliases resolve.
+    "favorite": "COALESCE(u.favorite,0) DESC, u.rating DESC NULLS LAST, g.name COLLATE NOCASE ASC",
+    "myrating": "u.rating DESC NULLS LAST, g.name COLLATE NOCASE ASC",
+    "year": "g.releasedate DESC NULLS LAST, g.name COLLATE NOCASE ASC",
+    "year_asc": "g.releasedate ASC NULLS LAST, g.name COLLATE NOCASE ASC",
 }
 
 
+# Per-game user data joined into list/detail queries (aliased to avoid colliding
+# with the scraper's own `rating` column).
+_USER_JOIN = ("LEFT JOIN game_user_data u "
+              "ON u.system_id = g.system_id AND u.rom_filename = g.rom_filename")
+_USER_COLS = ("u.favorite AS u_favorite, u.rating AS u_rating, u.status AS u_status, "
+              "u.tags AS u_tags, u.notes AS u_notes")
+
+
 def _game_dict(r) -> dict:
+    k = r.keys()
     return {
         "id": r["id"],
         "system_id": r["system_id"],
@@ -374,12 +391,22 @@ def _game_dict(r) -> dict:
             "video": bool(r["video_file"]),
             "metadata": bool(r["has_textual"]),
         },
+        "user": {
+            "favorite": bool(r["u_favorite"]) if "u_favorite" in k else False,
+            "rating": r["u_rating"] if "u_rating" in k else None,
+            "status": (r["u_status"] if "u_status" in k else None) or "",
+            "tags": (r["u_tags"] if "u_tags" in k else None) or "",
+            "notes": (r["u_notes"] if "u_notes" in k else None) or "",
+        },
     }
 
 
 def _games_where(system_id: str, search: str, coverage: Optional[str],
-                 region: Optional[str] = None):
-    """Shared WHERE builder for library listing and bulk add-by-query."""
+                 region: Optional[str] = None, genre: Optional[str] = None,
+                 favorite: bool = False, status: Optional[str] = None):
+    """Shared WHERE builder for library listing and bulk add-by-query. The
+    favorite/status predicates reference the game_user_data alias `u`, so callers
+    using these must include _USER_JOIN in their query."""
     where = ["g.system_id = ?"]
     params: list = [system_id]
     if search and search.strip():
@@ -392,6 +419,14 @@ def _games_where(system_id: str, search: str, coverage: Optional[str],
     if region:
         where.append("g.region LIKE ?")
         params.append(f"%{region}%")
+    if genre:
+        where.append("g.genre LIKE ?")
+        params.append(f"%{genre}%")
+    if favorite:
+        where.append("COALESCE(u.favorite,0) = 1")
+    if status:
+        where.append("u.status = ?")
+        params.append(status)
     return " AND ".join(where), params
 
 
@@ -498,6 +533,9 @@ def list_games(
     coverage: Optional[str] = Query(None, pattern="^(complete|partial|missing)$"),
     sort: str = Query("name"),
     region: Optional[str] = Query(None),
+    genre: Optional[str] = Query(None),
+    favorite: bool = Query(False),
+    status: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     selected_for: Optional[int] = Query(None, description="collection id to flag membership"),
@@ -505,11 +543,11 @@ def list_games(
     if not _conn.execute("SELECT 1 FROM systems WHERE id = ?", (system_id,)).fetchone():
         raise HTTPException(404, "Unknown system")
 
-    where_sql, params = _games_where(system_id, search, coverage, region)
+    where_sql, params = _games_where(system_id, search, coverage, region, genre, favorite, status)
     order = _SORTS.get(sort, _SORTS["name"])
 
     total = _conn.execute(
-        f"SELECT COUNT(*) n FROM games g WHERE {where_sql}", params
+        f"SELECT COUNT(*) n FROM games g {_USER_JOIN} WHERE {where_sql}", params
     ).fetchone()["n"]
 
     sel_join = ""
@@ -522,8 +560,8 @@ def list_games(
         sel_params = [selected_for]
 
     rows = _conn.execute(
-        f"SELECT g.*, {sel_col} FROM games g {sel_join} WHERE {where_sql} "
-        f"ORDER BY {order} LIMIT ? OFFSET ?",
+        f"SELECT g.*, {sel_col}, {_USER_COLS} FROM games g {sel_join} {_USER_JOIN} "
+        f"WHERE {where_sql} ORDER BY {order} LIMIT ? OFFSET ?",
         sel_params + params + [limit, offset],
     ).fetchall()
 
@@ -535,6 +573,15 @@ def list_games(
     return {"total": total, "limit": limit, "offset": offset, "games": out}
 
 
+@app.get("/api/systems/{system_id}/genres")
+def system_genres(system_id: str):
+    """Distinct genres present in a system, for the genre filter dropdown."""
+    rows = _conn.execute(
+        "SELECT DISTINCT genre FROM games WHERE system_id=? AND genre IS NOT NULL "
+        "AND genre != '' ORDER BY genre COLLATE NOCASE", (system_id,)).fetchall()
+    return [r["genre"] for r in rows]
+
+
 @app.get("/api/games/{game_id}")
 def game_detail(game_id: int):
     r = _conn.execute("SELECT * FROM games WHERE id = ?", (game_id,)).fetchone()
@@ -543,6 +590,15 @@ def game_detail(game_id: int):
     d = _game_dict(r)
     d["description"] = r["description"]
     d["stem"] = r["stem"]
+    u = _conn.execute(
+        "SELECT favorite AS u_favorite, rating AS u_rating, status AS u_status, "
+        "tags AS u_tags, notes AS u_notes FROM game_user_data "
+        "WHERE system_id=? AND rom_filename=?", (r["system_id"], r["rom_filename"])
+    ).fetchone()
+    if u:
+        d["user"] = {"favorite": bool(u["u_favorite"]), "rating": u["u_rating"],
+                     "status": u["u_status"] or "", "tags": u["u_tags"] or "",
+                     "notes": u["u_notes"] or ""}
     # The drawer resolves video on demand too, so it plays even before a full
     # rescan has indexed video_file for this system.
     if not d["has"]["video"]:
@@ -637,6 +693,55 @@ def edit_metadata(game_id: int, body: MetadataIn):
          fields["publisher"], fields["genre"], fields["players"],
          fields["releasedate"], fields["rating"], cov, game_id),
     )
+    _conn.commit()
+    return game_detail(game_id)
+
+
+class UserDataIn(BaseModel):
+    favorite: Optional[bool] = None
+    rating: Optional[float] = None       # 0–5 user stars (half steps); 0 clears
+    status: Optional[str] = None         # '', playing, beaten, completed, dropped
+    tags: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@app.patch("/api/games/{game_id}/user")
+def edit_user_data(game_id: int, body: UserDataIn):
+    """Favorite / rating / completion / tags / notes — kept in game_user_data by
+    natural key so it survives rescans (the games row is rebuilt each scan)."""
+    r = _conn.execute(
+        "SELECT system_id, rom_filename FROM games WHERE id=?", (game_id,)).fetchone()
+    if not r:
+        raise HTTPException(404, "Unknown game")
+    sid, fn = r["system_id"], r["rom_filename"]
+    cur = _conn.execute(
+        "SELECT favorite, rating, status, tags, notes FROM game_user_data "
+        "WHERE system_id=? AND rom_filename=?", (sid, fn)).fetchone()
+    data = {"favorite": (cur["favorite"] if cur else 0),
+            "rating": (cur["rating"] if cur else None),
+            "status": (cur["status"] if cur else None),
+            "tags": (cur["tags"] if cur else None),
+            "notes": (cur["notes"] if cur else None)}
+    patch = body.model_dump(exclude_unset=True)   # distinguish "omitted" from "cleared"
+    if "favorite" in patch:
+        data["favorite"] = int(bool(patch["favorite"]))
+    if "rating" in patch:
+        data["rating"] = patch["rating"] or None
+    if "status" in patch:
+        data["status"] = (patch["status"] or "").strip() or None
+    if "tags" in patch:
+        data["tags"] = (patch["tags"] or "").strip() or None
+    if "notes" in patch:
+        data["notes"] = (patch["notes"] or "").strip() or None
+    _conn.execute(
+        "INSERT INTO game_user_data"
+        "(system_id, rom_filename, favorite, rating, status, tags, notes, updated_epoch) "
+        "VALUES (?,?,?,?,?,?,?,?) "
+        "ON CONFLICT(system_id, rom_filename) DO UPDATE SET "
+        "favorite=excluded.favorite, rating=excluded.rating, status=excluded.status, "
+        "tags=excluded.tags, notes=excluded.notes, updated_epoch=excluded.updated_epoch",
+        (sid, fn, data["favorite"], data["rating"], data["status"],
+         data["tags"], data["notes"], int(time.time())))
     _conn.commit()
     return game_detail(game_id)
 
@@ -800,11 +905,13 @@ def bulk_delete_games(body: BulkDeleteBody):
 class CollectionCreate(BaseModel):
     name: str
     note: Optional[str] = None
+    rules: Optional[dict] = None       # non-empty => a smart collection
 
 
 class CollectionPatch(BaseModel):
     name: Optional[str] = None
     note: Optional[str] = None
+    rules: Optional[dict] = None       # {} / null clears smart (back to manual)
 
 
 class GameRef(BaseModel):
@@ -827,6 +934,62 @@ def _collection_or_404(cid: int):
     if not row:
         raise HTTPException(404, "Unknown collection")
     return row
+
+
+_SMART_STATUS = {"playing", "beaten", "completed", "dropped"}
+
+
+def _smart_where(rules: dict):
+    """Build a WHERE over games g (+ user join alias u) from a smart-collection
+    rule set. Fields AND together; multi-value fields OR within."""
+    where, params = [], []
+    systems = rules.get("systems") or []
+    if systems:
+        where.append("g.system_id IN (%s)" % ",".join("?" * len(systems)))
+        params += systems
+    genres = rules.get("genres") or []
+    if genres:
+        where.append("(" + " OR ".join(["g.genre LIKE ?"] * len(genres)) + ")")
+        params += [f"%{x}%" for x in genres]
+    if rules.get("coverage") in ("complete", "partial", "missing"):
+        where.append("g.coverage = ?"); params.append(rules["coverage"])
+    if rules.get("region"):
+        where.append("g.region LIKE ?"); params.append(f"%{rules['region']}%")
+    if rules.get("search"):
+        where.append("(g.name LIKE ? OR g.rom_filename LIKE ?)")
+        t = f"%{rules['search']}%"; params += [t, t]
+    if rules.get("favorite"):
+        where.append("COALESCE(u.favorite,0) = 1")
+    if rules.get("status") in _SMART_STATUS:
+        where.append("u.status = ?"); params.append(rules["status"])
+    if rules.get("min_rating") is not None:
+        try:
+            where.append("COALESCE(u.rating,0) >= ?"); params.append(float(rules["min_rating"]))
+        except (TypeError, ValueError):
+            pass
+    return (" AND ".join(where) if where else "1=1"), params
+
+
+def _resolve_smart(cid: int, rules: dict) -> None:
+    """Replace a smart collection's membership with the games matching its rules."""
+    wsql, params = _smart_where(rules)
+    _conn.execute("DELETE FROM collection_games WHERE collection_id = ?", (cid,))
+    _conn.execute(
+        "INSERT OR IGNORE INTO collection_games"
+        "(collection_id, system_id, rom_filename, added_epoch) "
+        f"SELECT ?, g.system_id, g.rom_filename, ? FROM games g {_USER_JOIN} WHERE {wsql}",
+        [cid, int(time.time())] + params)
+    _conn.commit()
+
+
+def _resolve_all_smart() -> None:
+    """Re-evaluate every smart collection (called after a library scan)."""
+    for c in _conn.execute(
+            "SELECT id, rules FROM collections WHERE rules IS NOT NULL").fetchall():
+        try:
+            _resolve_smart(c["id"], json.loads(c["rules"]))
+        except Exception:
+            pass
 
 
 def _touch(cid: int) -> None:
@@ -855,8 +1018,10 @@ def _collection_detail(cid: int) -> dict:
         "WHERE cg.collection_id = ? GROUP BY cg.system_id ORDER BY display_name",
         (cid,)
     ).fetchall()
+    rules = json.loads(c["rules"]) if c["rules"] else None
     return {
         "id": c["id"], "name": c["name"], "note": c["note"],
+        "rules": rules, "smart": bool(rules),
         "created_epoch": c["created_epoch"], "updated_epoch": c["updated_epoch"],
         "game_count": total_members,
         "resolved": stats["n"] or 0,
@@ -876,7 +1041,12 @@ def list_collections():
         "SELECT c.*, (SELECT COUNT(*) FROM collection_games cg WHERE cg.collection_id=c.id) game_count "
         "FROM collections c ORDER BY c.updated_epoch DESC, c.name COLLATE NOCASE"
     ).fetchall()
-    return [dict(r) for r in rows]
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["smart"] = bool(d.pop("rules", None))
+        out.append(d)
+    return out
 
 
 @app.post("/api/collections")
@@ -885,11 +1055,14 @@ def create_collection(body: CollectionCreate):
     if not name:
         raise HTTPException(400, "Name required")
     now = int(time.time())
+    rules = body.rules or None
     cur = _conn.execute(
-        "INSERT INTO collections(name, note, created_epoch, updated_epoch) VALUES (?,?,?,?)",
-        (name, body.note, now, now),
+        "INSERT INTO collections(name, note, rules, created_epoch, updated_epoch) VALUES (?,?,?,?,?)",
+        (name, body.note, json.dumps(rules) if rules else None, now, now),
     )
     _conn.commit()
+    if rules:
+        _resolve_smart(cur.lastrowid, rules)
     return _collection_detail(cur.lastrowid)
 
 
@@ -901,18 +1074,26 @@ def get_collection(cid: int):
 @app.patch("/api/collections/{cid}")
 def patch_collection(cid: int, body: CollectionPatch):
     _collection_or_404(cid)
+    fields = body.model_dump(exclude_unset=True)   # distinguish omitted from cleared
     sets, params = [], []
-    if body.name is not None:
-        n = body.name.strip()
+    if "name" in fields:
+        n = (fields["name"] or "").strip()
         if not n:
             raise HTTPException(400, "Name cannot be empty")
         sets.append("name = ?"); params.append(n)
-    if body.note is not None:
-        sets.append("note = ?"); params.append(body.note)
+    if "note" in fields:
+        sets.append("note = ?"); params.append(fields["note"])
+    new_rules, rules_changed = None, False
+    if "rules" in fields:
+        rules_changed = True
+        new_rules = fields["rules"] or None
+        sets.append("rules = ?"); params.append(json.dumps(new_rules) if new_rules else None)
     if sets:
         sets.append("updated_epoch = ?"); params.append(int(time.time()))
         _conn.execute(f"UPDATE collections SET {', '.join(sets)} WHERE id = ?", params + [cid])
         _conn.commit()
+    if rules_changed and new_rules:
+        _resolve_smart(cid, new_rules)   # repopulate from the new rules
     return _collection_detail(cid)
 
 
@@ -959,8 +1140,11 @@ def add_games_by_id(cid: int, body: BulkDeleteBody):
 @app.post("/api/collections/{cid}/refresh")
 def refresh_collection(cid: int):
     """Re-read each member game's media + metadata from the library (in place,
-    ids stable) so an export reflects edits/scrapes made since the last scan."""
-    _collection_or_404(cid)
+    ids stable) so an export reflects edits/scrapes made since the last scan.
+    For a smart collection, first re-evaluate its rules."""
+    c = _collection_or_404(cid)
+    if c["rules"]:
+        _resolve_smart(cid, json.loads(c["rules"]))
     rows = _conn.execute(
         "SELECT system_id, rom_filename FROM collection_games WHERE collection_id=?",
         (cid,)).fetchall()
@@ -1025,6 +1209,9 @@ def collection_games(
     sort: str = Query("name"),
     system: Optional[str] = None,
     region: Optional[str] = Query(None),
+    genre: Optional[str] = Query(None),
+    favorite: bool = Query(False),
+    status: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
@@ -1040,15 +1227,22 @@ def collection_games(
         where.append("g.coverage = ?"); params.append(coverage)
     if region:
         where.append("g.region LIKE ?"); params.append(f"%{region}%")
+    if genre:
+        where.append("g.genre LIKE ?"); params.append(f"%{genre}%")
+    if favorite:
+        where.append("COALESCE(u.favorite,0) = 1")
+    if status:
+        where.append("u.status = ?"); params.append(status)
     where_sql = " AND ".join(where)
     order = _SORTS.get(sort, _SORTS["name"])
     join = ("FROM collection_games cg "
             "JOIN games g ON g.system_id=cg.system_id AND g.rom_filename=cg.rom_filename")
     total = _conn.execute(
-        f"SELECT COUNT(*) n {join} WHERE {where_sql}", params
+        f"SELECT COUNT(*) n {join} {_USER_JOIN} WHERE {where_sql}", params
     ).fetchone()["n"]
     rows = _conn.execute(
-        f"SELECT g.* {join} WHERE {where_sql} ORDER BY {order} LIMIT ? OFFSET ?",
+        f"SELECT g.*, {_USER_COLS} {join} {_USER_JOIN} WHERE {where_sql} "
+        f"ORDER BY {order} LIMIT ? OFFSET ?",
         params + [limit, offset],
     ).fetchall()
     out = []

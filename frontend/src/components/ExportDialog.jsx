@@ -4,9 +4,11 @@ import { formatSize } from './bits.jsx'
 
 const TARGETS = [
   { id: 'raw', name: 'Raw / Universal', hint: 'Original folders + Skyscraper media & textual XML, verbatim.' },
-  { id: 'es-de', name: 'ES-DE', hint: 'ROMs/<sys>/ + downloaded_media/<sys>/ + gamelist.xml (media auto-linked).' },
-  { id: 'batocera', name: 'Batocera', hint: '<sys>/ + images/<rom>-image|thumb|marquee + gamelist.xml.' },
-  { id: 'retrobat', name: 'Retrobat', hint: 'roms/<sys>/ + images/ + gamelist.xml (Windows ES).' },
+  { id: 'es-de', name: 'ES-DE', hint: 'ROMs/<sys>/ + downloaded_media/<sys>/ + gamelist.xml (media auto-linked). Favorites in gamelist.' },
+  { id: 'batocera', name: 'Batocera', hint: '<sys>/ + images/ + gamelist.xml. Also covers Knulli / ROCKNIX / AmberELEC (ES handhelds). Favorites in gamelist.' },
+  { id: 'retrobat', name: 'Retrobat', hint: 'roms/<sys>/ + images/ + gamelist.xml (Windows ES). Favorites in gamelist.' },
+  { id: 'muos', name: 'muOS', hint: 'ROMS/<sys>/ + MUOS/info/catalogue art + collection & Favourite .cfg. (handheld)' },
+  { id: 'minui', name: 'MinUI / NextUI', hint: 'Roms/<Name> (TAG)/ + .res/ art + Collections/*.txt favorites. (handheld)' },
 ]
 const ASSETS = ['cover', 'screenshot', 'wheel', 'marquee', 'video']
 const MODES = [

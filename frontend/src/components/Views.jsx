@@ -60,7 +60,7 @@ export function DetailsView({ games, onOpen, sel }) {
   )
 }
 
-export function BoxartView({ games, onOpen, sel }) {
+export function BoxartView({ games, onOpen, sel, onFavorite }) {
   return (
     <div className="grid">
       {games.map((g) => {
@@ -69,6 +69,11 @@ export function BoxartView({ games, onOpen, sel }) {
           <div key={g.id} className={`cardb${s.on ? ' sel' : ''}`} onClick={() => onOpen(g)}>
             <div className="art">
               {s.node}
+              {onFavorite && (
+                <button className={`fav${g.user?.favorite ? ' on' : ''}`}
+                        title={g.user?.favorite ? 'Remove favorite' : 'Mark favorite'}
+                        onClick={(e) => { e.stopPropagation(); onFavorite(g) }}>♥</button>
+              )}
               {g.has.cover ? (
                 <RetryImg src={mediaUrl(g.id, 'cover', 320)} alt={g.name}
                           fallback={<span className="noart">{g.name}</span>} />
