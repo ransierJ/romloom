@@ -1,9 +1,15 @@
-# ROMLoom
+<p align="center">
+  <img src="docs/logo.png" alt="ROMLoom" width="120" height="120" />
+</p>
 
-Self-hosted web app to **browse a scraped ROM library, scrape or hand-fix the
-gaps, cherry-pick per-device collections, and export them packaged for any
-frontend** — ES-DE, Batocera, Retrobat, or a raw copy. Runs as a single Docker
-container on a NAS.
+<h1 align="center">ROMLoom</h1>
+
+<p align="center">
+  Self-hosted web app to <b>browse a scraped ROM library, scrape or hand-fix the
+  gaps, cherry-pick per-device collections, and export them packaged for any
+  frontend</b> — ES-DE, Batocera, Retrobat, handhelds, or a raw copy.<br/>
+  Runs as a single Docker container on a NAS.
+</p>
 
 ![ROMLoom library — boxart grid](docs/library.png)
 
