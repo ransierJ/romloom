@@ -23,7 +23,8 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel
 
-from . import catalog, config, db, export, platforms, scanner, scraper, settings, thumbnails
+from . import (catalog, config, db, export, gametdb, igdb, libretro, platforms,
+               scanner, scraper, settings, thumbnails)
 from .scanner import scan
 
 app = FastAPI(title="ROMForge", version="0.1.0")
@@ -98,23 +99,40 @@ def _reindex_after_scrape(system_id, filenames):
         pass
 
 
+def _games_for_scrape(system_id: str, filenames):
+    q = "SELECT id, stem, rom_filename FROM games WHERE system_id=?"
+    params = [system_id]
+    if filenames:
+        q += " AND rom_filename IN (%s)" % ",".join("?" * len(filenames))
+        params += filenames
+    return _conn.execute(q, params).fetchall()
+
+
 def _run_scrape(system_id: str, folder: str, filenames, control) -> None:
     try:
-        cfg = settings.load()
-        creds = cfg.get("screenscraper", {})
-        prefs = cfg.get("scrape", {})
-        scraper.configure(creds.get("user", ""), creds.get("password", ""),
-                          region=prefs.get("region") or "us",
-                          lang=prefs.get("lang") or "en")
-
         def prog(cur, total, phase):
             if _scrape_status["state"] == "paused":
                 return
             _scrape_status.update(current=cur, total=total, phase=phase,
                                   message=f"{phase} {cur}/{total}")
 
-        scraper.scrape(system_id, folder, filenames=filenames,
-                       on_progress=prog, control=control)
+        if gametdb.handles(system_id):          # Wii / Wii U -> GameTDB by GameID
+            rows = _games_for_scrape(system_id, filenames)
+            gametdb.scrape(system_id, folder, rows, on_progress=prog, control=control)
+        elif libretro.handles(system_id):       # Xbox / PS3 -> libretro art…
+            rows = _games_for_scrape(system_id, filenames)
+            libretro.scrape(system_id, folder, rows, on_progress=prog, control=control)
+            if igdb.configured():               # …+ IGDB for text metadata / gaps
+                igdb.scrape(system_id, folder, rows, on_progress=prog, control=control)
+        else:                                   # everything else -> Skyscraper
+            cfg = settings.load()
+            creds = cfg.get("screenscraper", {})
+            prefs = cfg.get("scrape", {})
+            scraper.configure(creds.get("user", ""), creds.get("password", ""),
+                              region=prefs.get("region") or "us",
+                              lang=prefs.get("lang") or "en")
+            scraper.scrape(system_id, folder, filenames=filenames,
+                           on_progress=prog, control=control)
         _reindex_after_scrape(system_id, filenames)  # keeps game ids stable
         _scrape_status.update(state="done", phase=None,
                               message="Scrape complete", error=None)
@@ -130,28 +148,36 @@ def _run_scrape(system_id: str, folder: str, filenames, control) -> None:
 
 @app.get("/api/scrape/available")
 def scrape_available(system_id: Optional[str] = None):
-    creds = settings.masked(settings.load()).get("screenscraper", {})
-    out = {
-        "installed": scraper.available(),
-        "credentials_set": bool(creds.get("user") and creds.get("password_set")),
-    }
+    masked = settings.masked(settings.load()).get("screenscraper", {})
+    creds_set = bool(masked.get("user") and masked.get("password_set"))
+    out = {"installed": scraper.available(), "credentials_set": creds_set,
+           "scrapable": False, "backend": None, "needs_credentials": False}
     if system_id:
-        out["platform"] = scraper.platform(system_id)   # None => unsupported
+        if gametdb.handles(system_id):           # Wii / Wii U -> GameTDB, no login
+            out.update(scrapable=True, backend="gametdb", needs_credentials=False)
+        elif libretro.handles(system_id):        # Xbox / PS3 -> libretro, no login
+            out.update(scrapable=True, backend="libretro", needs_credentials=False)
+        elif scraper.available() and scraper.platform(system_id):
+            out.update(scrapable=True, backend="skyscraper", needs_credentials=True,
+                       platform=scraper.platform(system_id))
     return out
 
 
 @app.post("/api/scrape")
 def start_scrape(body: ScrapeIn):
-    if not scraper.available():
-        raise HTTPException(503, "Skyscraper is not installed in this image")
-    if scraper.platform(body.system_id) is None:
-        raise HTTPException(400, f"Scraping isn't supported for '{body.system_id}'")
+    use_native = gametdb.handles(body.system_id) or libretro.handles(body.system_id)
+    if not use_native:
+        if not scraper.available():
+            raise HTTPException(503, "Skyscraper is not installed in this image")
+        if scraper.platform(body.system_id) is None:
+            raise HTTPException(400, f"Scraping isn't supported for '{body.system_id}'")
     folder = _system_folder(body.system_id)
     if not folder:
         raise HTTPException(404, "Unknown system")
-    creds = settings.load().get("screenscraper", {})
-    if not (creds.get("user") and creds.get("password")):
-        raise HTTPException(400, "Set your ScreenScraper login in Settings first")
+    if not use_native:
+        creds = settings.load().get("screenscraper", {})
+        if not (creds.get("user") and creds.get("password")):
+            raise HTTPException(400, "Set your ScreenScraper login in Settings first")
 
     filenames = None
     if body.game_ids:

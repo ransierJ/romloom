@@ -35,7 +35,15 @@ class ScrapeControl:
     def __init__(self) -> None:
         self._proc: Optional[subprocess.Popen] = None
         self._lock = threading.Lock()
+        self._paused = threading.Event()   # set => paused (for in-process backends)
         self.cancelled = False
+
+    def wait_if_paused(self) -> None:
+        """Block while paused (used by the in-process GameTDB backend; the
+        Skyscraper subprocess is frozen by SIGSTOP instead)."""
+        import time as _t
+        while self._paused.is_set() and not self.cancelled:
+            _t.sleep(0.15)
 
     def _attach(self, proc: Optional[subprocess.Popen]) -> None:
         with self._lock:
@@ -56,9 +64,11 @@ class ScrapeControl:
         self._signal(signal.SIGTERM)
 
     def pause(self) -> None:
+        self._paused.set()
         self._signal(signal.SIGSTOP)
 
     def resume(self) -> None:
+        self._paused.clear()
         self._signal(signal.SIGCONT)
 
 BINARY = "/usr/local/bin/Skyscraper"

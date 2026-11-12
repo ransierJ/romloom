@@ -37,9 +37,11 @@ container on a NAS.
   the NAS.
 - **Game drawer** with full metadata, boxart, an asset checklist, and the
   **gameplay video** (streamed with seek support) when one exists.
-- **Built-in scraping** (bundled Skyscraper → ScreenScraper) for a whole system,
-  a single game, or a multi-selection — with a live status panel you can
-  **pause / resume / stop / restart**.
+- **Built-in scraping** — for a whole system, a single game, or a multi-selection,
+  with a live status panel you can **pause / resume / stop / restart**. It picks
+  the right source per system automatically: Skyscraper→ScreenScraper for most,
+  **GameTDB** for Wii/Wii U (3D box + metadata by GameID), **libretro-thumbnails**
+  for Xbox/PS3 art, and **IGDB** for Xbox/360/PS3 text metadata.
 - **Manual metadata & art editing** for anything scrapers can't identify (ROM
   hacks, translations, obscure dumps).
 - **"Missing ROMs"** view that diffs your library against the complete No-Intro /
@@ -88,19 +90,30 @@ settings) lives in `/config` and is never written to your source library.
 
 ## Scraping
 
-ROMForge bundles **Skyscraper**, so scraping needs no extra tools — just your
-ScreenScraper login (⚙ **Settings** in the sidebar). From there:
+Scrape a whole system (**⬇ scrape** in the toolbar), a single game (**⟳ Rescrape**
+in its drawer), or a multi-selection (**⬇ Rescrape** in the bulk bar). A **status
+panel** shows live progress and lets you **pause, resume, stop, or restart**;
+stopping keeps whatever already landed. Everything is written **into the library**
+(covers, screenshots, metadata) so it flows into exports and survives rescans.
 
-- **⬇ scrape** a whole system from the toolbar, **⟳ Rescrape** a single game from
-  its drawer, or **⬇ Rescrape** a multi-selection from the bulk bar.
-- A **status panel** shows live progress (gather → generate) and lets you
-  **pause, resume, stop, or restart**; stopping keeps whatever already landed.
-- **Preferred region** (Settings) picks US / EU / JP / World names *and* box art,
-  so US games don't come back with PAL names (e.g. "Starwing" instead of
-  "Star Fox"). It re-fetches on each scrape so a region change actually applies.
+ROMForge chooses the best **source per system** automatically — no per-game
+fiddling:
 
-Scraped media + metadata are written **into the library** (covers, screenshots,
-videos, `gamelist.xml`), so they flow straight into exports and survive rescans.
+| Source | Systems | Needs | Gets |
+| --- | --- | --- | --- |
+| **Skyscraper → ScreenScraper** | most consoles | your ScreenScraper login | box/screens/wheels/marquees/video + metadata |
+| **GameTDB** | Wii, Wii U | nothing | 3D box + metadata by the GameID in the folder name |
+| **libretro-thumbnails** | Xbox, PS3 (+ screenshots for Wii/Wii U) | nothing | box art + screenshots, matched by title |
+| **IGDB** | Xbox, Xbox 360, PS3 | free Twitch Client ID + Secret | text metadata (+ cover/screens where missing) |
+
+- **ScreenScraper** games honor a **Preferred region** (Settings) for US / EU / JP
+  names *and* box art, so US games don't come back with PAL names ("Starwing" vs
+  "Star Fox"); it re-fetches each scrape so a region change applies.
+- **GameTDB / libretro / IGDB** are title/GameID-matched and need no ROM hashing —
+  the fix for HD disc systems ScreenScraper can't match. GameTDB and libretro are
+  **keyless**; IGDB just needs a free Twitch app.
+- Credentials live in ⚙ **Settings** (ScreenScraper login, preferred region, IGDB
+  Client ID/Secret) and are masked on read.
 
 ## Editing & the "Missing ROMs" view
 
@@ -221,5 +234,6 @@ binary simply hides the scrape buttons.
 
 ## Stack
 
-FastAPI + SQLite + Pillow, with a bundled Skyscraper for scraping (backend) ·
-React + Vite (frontend) · single Docker image serving both.
+FastAPI + SQLite + Pillow, with a bundled Skyscraper plus GameTDB / libretro-
+thumbnails / IGDB scraping sources (backend) · React + Vite (frontend) · single
+Docker image serving both.

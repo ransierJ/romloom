@@ -350,7 +350,7 @@ export default function App() {
 
   const restartScrape = (request) => { runScrape(request) }
 
-  const canScrape = scrapeInfo && scrapeInfo.installed && scrapeInfo.platform
+  const canScrape = scrapeInfo && scrapeInfo.scrapable
   const scrapeBusy = scrapeStatus && (scrapeStatus.state === 'running' || scrapeStatus.state === 'paused')
 
   // Select mode (for bulk delete) takes over the checkboxes when active.
@@ -376,7 +376,7 @@ export default function App() {
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
-          <span className="mark">🕹</span><b>ROMFORGE</b><span className="ver">v0.9.0</span>
+          <span className="mark">🕹</span><b>ROMFORGE</b><span className="ver">v0.9.3</span>
         </div>
         <div className="tabs">
           <button className={mode === 'library' ? 'on' : ''} onClick={() => setMode('library')}>Systems</button>

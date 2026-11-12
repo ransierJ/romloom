@@ -8,6 +8,9 @@ export default function SettingsDialog({ onClose, onSaved }) {
   const [password, setPassword] = React.useState('')
   const [pwSet, setPwSet] = React.useState(false)
   const [region, setRegion] = React.useState('us')
+  const [igdbId, setIgdbId] = React.useState('')
+  const [igdbSecret, setIgdbSecret] = React.useState('')
+  const [igdbSecretSet, setIgdbSecretSet] = React.useState(false)
   const [installed, setInstalled] = React.useState(true)
   const [saving, setSaving] = React.useState(false)
   const [msg, setMsg] = React.useState(null)
@@ -17,6 +20,8 @@ export default function SettingsDialog({ onClose, onSaved }) {
       setUser(s.screenscraper?.user || '')
       setPwSet(!!s.screenscraper?.password_set)
       setRegion(s.scrape?.region || 'us')
+      setIgdbId(s.igdb?.client_id || '')
+      setIgdbSecretSet(!!s.igdb?.client_secret_set)
     }).catch(() => {})
     api.scrapeAvailable().then((a) => setInstalled(a.installed)).catch(() => {})
   }, [])
@@ -29,8 +34,9 @@ export default function SettingsDialog({ onClose, onSaved }) {
 
   const save = async () => {
     setSaving(true); setMsg(null)
-    const body = { screenscraper: { user }, scrape: { region } }
+    const body = { screenscraper: { user }, scrape: { region }, igdb: { client_id: igdbId } }
     if (password) body.screenscraper.password = password   // omit = keep existing
+    if (igdbSecret) body.igdb.client_secret = igdbSecret
     try {
       await api.patchSettings(body)
       setMsg('Saved')
@@ -83,6 +89,22 @@ export default function SettingsDialog({ onClose, onSaved }) {
             Which region’s names & box art to prefer (falls back to others if unavailable).
             USA avoids PAL names like “Starwing”/“Mega CD”.
           </p>
+
+          <h3 style={{ marginTop: 22 }}>IGDB (optional)</h3>
+          <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
+            Supplies text metadata for Xbox / Xbox 360 / PS3 (which libretro-thumbnails
+            doesn’t carry). Create a free app at dev.twitch.tv to get a Client ID + Secret.
+          </p>
+          <label className="efield">
+            <span>Twitch Client ID</span>
+            <input value={igdbId} onChange={(e) => setIgdbId(e.target.value)} autoComplete="off" />
+          </label>
+          <label className="efield" style={{ marginTop: 12 }}>
+            <span>Client Secret {igdbSecretSet && <em style={{ color: 'var(--ink-faint)', fontStyle: 'normal' }}>· saved (leave blank to keep)</em>}</span>
+            <input type="password" value={igdbSecret} onChange={(e) => setIgdbSecret(e.target.value)}
+                   placeholder={igdbSecretSet ? '••••••••' : ''} autoComplete="new-password" />
+          </label>
+
           <div className="eactions" style={{ marginTop: 16 }}>
             {msg && <span className="muted" style={{ marginRight: 'auto', fontSize: 13 }}>{msg}</span>}
             <button className="btn sm ghost" onClick={onClose}>Close</button>
