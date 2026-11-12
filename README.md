@@ -1,11 +1,11 @@
-# ROMForge
+# ROMLoom
 
 Self-hosted web app to **browse a scraped ROM library, scrape or hand-fix the
 gaps, cherry-pick per-device collections, and export them packaged for any
 frontend** — ES-DE, Batocera, Retrobat, or a raw copy. Runs as a single Docker
 container on a NAS.
 
-![ROMForge library — boxart grid](docs/library.png)
+![ROMLoom library — boxart grid](docs/library.png)
 
 <table>
   <tr>
@@ -71,11 +71,11 @@ region when the ROM is named by id (normalized matching recovers the link).
    ```bash
    docker compose up -d
    ```
-   The public image is `ghcr.io/ransierj/romforge:latest`.
+   The public image is `ghcr.io/ransierj/romloom:latest`.
 3. Open `http://<nas-ip>:8096`, then click **rescan** (bottom-left) to index the
    library. The first scan of a large set over the NAS takes a couple of minutes
    (it also pre-builds thumbnails); after that it's cached in
-   `/config/romforge.db`.
+   `/config/romloom.db`.
 
    Later rescans are **incremental** — only systems whose folders changed are
    re-read, so adding a few ROMs indexes in about a second. Use **full** (next to
@@ -96,7 +96,7 @@ panel** shows live progress and lets you **pause, resume, stop, or restart**;
 stopping keeps whatever already landed. Everything is written **into the library**
 (covers, screenshots, metadata) so it flows into exports and survives rescans.
 
-ROMForge chooses the best **source per system** automatically — no per-game
+ROMLoom chooses the best **source per system** automatically — no per-game
 fiddling:
 
 | Source | Systems | Needs | Gets |
@@ -182,17 +182,17 @@ Each target is written under `OUTPUT_ROOT/<collection>/<target>/`:
 - **Copy / hardlink / symlink** modes: copy is portable; hardlink and symlink use
   near-zero extra space for frontends reading the same NAS.
 - Resume-friendly (existing same-size files are skipped), drops a
-  `romforge-manifest.json`, and **presets** save a target + media + mode combo
+  `romloom-manifest.json`, and **presets** save a target + media + mode combo
   for one-click repeat exports.
 
 ## Configuration
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `ROMFORGE_ROMS_ROOT` | `/roms` | Source library |
-| `ROMFORGE_OUTPUT_ROOT` | `/output` | Where collections are written |
-| `ROMFORGE_CONFIG_DIR` | `/config` | SQLite index, thumbnail + scrape cache, settings |
-| `ROMFORGE_PORT` | `8096` | HTTP port |
+| `ROMLOOM_ROMS_ROOT` | `/roms` | Source library |
+| `ROMLOOM_OUTPUT_ROOT` | `/output` | Where collections are written |
+| `ROMLOOM_CONFIG_DIR` | `/config` | SQLite index, thumbnail + scrape cache, settings |
+| `ROMLOOM_PORT` | `8096` | HTTP port |
 
 ## Layout it expects
 
@@ -219,7 +219,7 @@ Disc systems may instead store each game as `Game [GAMEID]/GAMEID.wbfs`, and
 cd backend
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
-ROMFORGE_ROMS_ROOT=/path/to/ROMs uvicorn app.main:app --reload --port 8096
+ROMLOOM_ROMS_ROOT=/path/to/ROMs uvicorn app.main:app --reload --port 8096
 
 # frontend (proxies /api to :8096)
 cd frontend

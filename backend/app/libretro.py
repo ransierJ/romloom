@@ -71,7 +71,7 @@ def has_repo(system_id: str) -> bool:
 
 def _http(url: str, timeout: int = 30) -> Optional[bytes]:
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "ROMForge"})
+        req = urllib.request.Request(url, headers={"User-Agent": "ROMLoom"})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             if r.status == 200:
                 return r.read()

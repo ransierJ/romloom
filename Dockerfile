@@ -43,10 +43,10 @@ COPY --from=frontend /build/backend/static ./static
 
 # HOME=/config so Skyscraper's ~/.skyscraper (config + scrape cache) lands on the
 # persistent volume. QT_QPA_PLATFORM=offscreen runs it without a display.
-ENV ROMFORGE_ROMS_ROOT=/roms \
-    ROMFORGE_OUTPUT_ROOT=/output \
-    ROMFORGE_CONFIG_DIR=/config \
-    ROMFORGE_PORT=8096 \
+ENV ROMLOOM_ROMS_ROOT=/roms \
+    ROMLOOM_OUTPUT_ROOT=/output \
+    ROMLOOM_CONFIG_DIR=/config \
+    ROMLOOM_PORT=8096 \
     HOME=/config \
     QT_QPA_PLATFORM=offscreen \
     PYTHONUNBUFFERED=1

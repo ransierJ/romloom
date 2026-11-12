@@ -1,13 +1,13 @@
 services:
-  romforge:
+  romloom:
     build: .
     # Or, once you've pushed an image to your registry:
-    # image: romforge:latest
-    container_name: romforge
+    # image: ghcr.io/ransierj/romloom:latest
+    container_name: romloom
     ports:
       - "8096:8096"
     volumes:
-      # Source library — READ-ONLY. ROMForge never writes here.
+      # Source library — READ-ONLY. ROMLoom never writes here.
       # Change the left side to wherever your ROMs live on the NAS.
       - /volume1/Plex3/ROMs:/roms:ro
       # Where forged collections are written (Phase 3). Read-write.
@@ -15,7 +15,7 @@ services:
       # Persistent app state: the SQLite index, thumbnail cache, settings.
       - ./config:/config
     environment:
-      - ROMFORGE_ROMS_ROOT=/roms
-      - ROMFORGE_OUTPUT_ROOT=/output
-      - ROMFORGE_CONFIG_DIR=/config
+      - ROMLOOM_ROMS_ROOT=/roms
+      - ROMLOOM_OUTPUT_ROOT=/output
+      - ROMLOOM_CONFIG_DIR=/config
     restart: unless-stopped

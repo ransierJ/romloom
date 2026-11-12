@@ -4,7 +4,7 @@ ScreenScraper (via Skyscraper) is weak for Wii: dumps are multi-GB, their hash
 depends on the format (.wbfs/.iso/.rvz), and the inner file is named by the
 GameID rather than a title. GameTDB is the Wii-native database (the source
 WiiFlow / USB Loader GX use): art and metadata keyed directly by the GameID,
-which ROMForge already has in the folder name (`Title [RMCE01]`).
+which ROMLoom already has in the folder name (`Title [RMCE01]`).
 
 Art: art.gametdb.com/wii/<type>/<region>/<ID>.png — we prefer the 3D box render.
 Metadata: the downloadable wiitdb.xml (cached), parsed by GameID. No API key.
@@ -66,7 +66,7 @@ def _regions_for(gid: str) -> list:
 
 def _http_get(url: str, timeout: int = 20) -> Optional[bytes]:
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "ROMForge"})
+        req = urllib.request.Request(url, headers={"User-Agent": "ROMLoom"})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             if r.status == 200:
                 return r.read()

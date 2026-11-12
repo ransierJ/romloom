@@ -149,7 +149,7 @@ def fetch(system_id: str) -> bytes:
     Raises on network/HTTP error (caller surfaces it)."""
     if system_id not in DAT_SOURCES:
         raise ValueError(f"no catalog source for {system_id!r}")
-    req = urllib.request.Request(_url(system_id), headers={"User-Agent": "ROMForge"})
+    req = urllib.request.Request(_url(system_id), headers={"User-Agent": "ROMLoom"})
     with urllib.request.urlopen(req, timeout=45) as resp:
         data = resp.read()
     config.CATALOG_DIR.mkdir(parents=True, exist_ok=True)

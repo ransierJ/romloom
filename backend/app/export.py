@@ -574,7 +574,7 @@ def run_export(plan: Plan, progress: Progress, manifest_epoch: int, mode: str = 
 def _write_manifest(plan: Plan, epoch: int, mode: str = "copy") -> None:
     import json
     manifest = {
-        "romforge_export": 1,
+        "romloom_export": 1,
         "collection": plan.collection_name,
         "target": plan.target,
         "mode": mode,
@@ -584,6 +584,6 @@ def _write_manifest(plan: Plan, epoch: int, mode: str = "copy") -> None:
         "total_bytes": plan.total_bytes,
         "systems": plan.summary()["systems"],
     }
-    path = config.OUTPUT_ROOT / plan.root_rel / "romforge-manifest.json"
+    path = config.OUTPUT_ROOT / plan.root_rel / "romloom-manifest.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")

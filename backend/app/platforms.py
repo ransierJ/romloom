@@ -20,7 +20,7 @@ from typing import Dict, List, Optional, Tuple
 
 @dataclass(frozen=True)
 class Platform:
-    canonical: str                   # ROMForge's stable internal id
+    canonical: str                   # ROMLoom's stable internal id
     display: str                     # human label shown in the UI
     es: Optional[str] = None         # ES-DE system id
     batocera: Optional[str] = None   # Batocera system id

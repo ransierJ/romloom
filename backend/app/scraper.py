@@ -4,7 +4,7 @@ Skyscraper is two-phase: `gather` queries ScreenScraper and caches resources per
 platform under $HOME/.skyscraper/cache/<platform>/, then `generate` renders that
 cache into on-disk media + a gamelist.xml. We run both into the library's media/
 folders using a raw artwork.xml (one file per media type, no compositing), so
-ROMForge and external frontends read the output directly. HOME is /config in the
+ROMLoom and external frontends read the output directly. HOME is /config in the
 container, so config + cache persist on the volume.
 
 No API keys needed here: Skyscraper carries its own ScreenScraper dev credential;
@@ -73,7 +73,7 @@ class ScrapeControl:
 
 BINARY = "/usr/local/bin/Skyscraper"
 
-# ROMForge canonical id -> Skyscraper platform id, only where they differ. Ids
+# ROMLoom canonical id -> Skyscraper platform id, only where they differ. Ids
 # not listed fall through to the canonical id if Skyscraper knows it (see _VALID).
 _OVERRIDES = {
     "amigacd32": "cd32", "colecovision": "coleco", "cps1": "arcade",
@@ -217,7 +217,7 @@ def scrape(system_id: str, folder: str, filenames=None,
     inc_path = None
     if filenames:
         _SKY_HOME.mkdir(parents=True, exist_ok=True)
-        inc_path = _SKY_HOME / "romforge-includefrom.txt"
+        inc_path = _SKY_HOME / "romloom-includefrom.txt"
         inc_path.write_text("\n".join(filenames) + "\n", encoding="utf-8")
         inc = ["--includefrom", str(inc_path)]
 

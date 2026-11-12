@@ -110,7 +110,7 @@ def _search(token: str, cid: str, title: str, platform_id: Optional[int]) -> Opt
 def _fetch_img(image_id: str, size: str) -> Optional[bytes]:
     try:
         req = urllib.request.Request(_IMG.format(size=size, image_id=image_id),
-                                     headers={"User-Agent": "ROMForge"})
+                                     headers={"User-Agent": "ROMLoom"})
         with urllib.request.urlopen(req, timeout=20) as r:
             if r.status == 200:
                 return r.read()

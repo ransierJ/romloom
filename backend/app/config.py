@@ -1,8 +1,8 @@
 """Runtime configuration, driven entirely by environment variables.
 
-Nothing is hard-coded to a single machine: point ROMFORGE_ROMS_ROOT at any
+Nothing is hard-coded to a single machine: point ROMLOOM_ROMS_ROOT at any
 library. Defaults are chosen so the app is also runnable straight from a dev
-checkout against the real NAS mount.
+checkout against the real NAS mount. The legacy ROMFORGE_* names still work.
 """
 from __future__ import annotations
 
@@ -10,20 +10,26 @@ import os
 from pathlib import Path
 
 
-def _path(env: str, default: str) -> Path:
-    return Path(os.environ.get(env, default)).expanduser()
+def _env(name: str, default: str) -> str:
+    # Prefer the ROMLOOM_* name; fall back to legacy ROMFORGE_* for existing
+    # deployments whose compose still sets the old variables.
+    return os.environ.get(f"ROMLOOM_{name}", os.environ.get(f"ROMFORGE_{name}", default))
+
+
+def _path(name: str, default: str) -> Path:
+    return Path(_env(name, default)).expanduser()
 
 
 # Source library — mounted read-only in Docker. Never written to.
-ROMS_ROOT: Path = _path("ROMFORGE_ROMS_ROOT", "/media/jean/Plex3/ROMs")
+ROMS_ROOT: Path = _path("ROMS_ROOT", "/media/jean/Plex3/ROMs")
 
 # Where forged collections are written (Phase 3). Created on demand.
-OUTPUT_ROOT: Path = _path("ROMFORGE_OUTPUT_ROOT", str(Path.cwd() / "output"))
+OUTPUT_ROOT: Path = _path("OUTPUT_ROOT", str(Path.cwd() / "output"))
 
 # Persistent app state: the SQLite index, the thumbnail cache, settings.
-CONFIG_DIR: Path = _path("ROMFORGE_CONFIG_DIR", str(Path.cwd() / "config"))
+CONFIG_DIR: Path = _path("CONFIG_DIR", str(Path.cwd() / "config"))
 
-DB_PATH: Path = CONFIG_DIR / "romforge.db"
+DB_PATH: Path = CONFIG_DIR / "romloom.db"
 THUMB_DIR: Path = CONFIG_DIR / "thumbs"
 SETTINGS_PATH: Path = CONFIG_DIR / "settings.json"
 # Cached reference catalogs (No-Intro / Redump .dat files) for the Missing view.
@@ -113,9 +119,20 @@ THUMB_WARM_WIDTHS = {"cover": (320, 120), "screenshot": (200,)}
 # requiring all four misrepresents non-arcade systems. Tunable later.
 COMPLETE_REQUIRES = ("cover", "screenshot", "textual")
 
-HTTP_PORT: int = int(os.environ.get("ROMFORGE_PORT", "8096"))
+HTTP_PORT: int = int(_env("PORT", "8096"))
 
 
 def ensure_dirs() -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     THUMB_DIR.mkdir(parents=True, exist_ok=True)
+    # Rebrand migration: adopt a pre-rename romforge.db (+ its WAL/SHM) as the
+    # romloom index so the existing library doesn't need a full rescan.
+    legacy = CONFIG_DIR / "romforge.db"
+    if legacy.is_file() and not DB_PATH.is_file():
+        for suffix in ("", "-wal", "-shm"):
+            src = Path(str(legacy) + suffix)
+            if src.is_file():
+                try:
+                    src.rename(Path(str(DB_PATH) + suffix))
+                except OSError:
+                    pass

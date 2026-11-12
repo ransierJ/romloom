@@ -1,4 +1,4 @@
-"""ROMForge HTTP API + static frontend host.
+"""ROMLoom HTTP API + static frontend host.
 
 Read-only over the library in Phase 1: scan the disk into the index, browse it,
 and serve art. Collections and export arrive in later phases.
@@ -27,7 +27,7 @@ from . import (catalog, config, db, export, gametdb, igdb, libretro, platforms,
                scanner, scraper, settings, thumbnails)
 from .scanner import scan
 
-app = FastAPI(title="ROMForge", version="0.1.0")
+app = FastAPI(title="ROMLoom", version="1.0.0")
 
 # A single shared connection is fine: SQLite in WAL mode handles our read-mostly,
 # single-writer access pattern, and FastAPI's threadpool is modest.
@@ -1462,21 +1462,14 @@ def game_video(game_id: int):
     return FileResponse(src, media_type=media_type or "video/mp4")
 
 
-# A tiny inline favicon so browsers stop logging a 404 for /favicon.ico — the
-# brand mark (accent square + joystick dot) as scalable SVG, no asset to ship.
-_FAVICON = (
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
-    '<rect width="32" height="32" rx="7" fill="#B0711A"/>'
-    '<circle cx="16" cy="13" r="4.2" fill="#fff"/>'
-    '<rect x="14.4" y="13" width="3.2" height="10" rx="1.6" fill="#fff"/>'
-    '</svg>'
-)
-
-
+# Serve the ROMLoom app icon for the legacy /favicon.ico path (modern browsers
+# use the <link rel="icon" href="/favicon.png"> in index.html).
 @app.get("/favicon.ico")
 def favicon():
-    return Response(content=_FAVICON, media_type="image/svg+xml",
-                    headers={"Cache-Control": "public, max-age=86400"})
+    png = Path(__file__).resolve().parent.parent / "static" / "favicon.png"
+    if png.is_file():
+        return FileResponse(png, media_type="image/png")
+    return Response(status_code=204)
 
 
 # --------------------------------------------------------------------------- #
