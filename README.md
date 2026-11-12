@@ -9,8 +9,8 @@ container on a NAS.
 
 <table>
   <tr>
-    <td><img src="docs/gaps.png" alt="Gaps view" /></td>
     <td><img src="docs/collection.png" alt="Collection page" /></td>
+    <td><img src="docs/missing.png" alt="Missing ROMs view" /></td>
   </tr>
   <tr>
     <td><img src="docs/export.png" alt="Export dialog" /></td>
@@ -18,7 +18,7 @@ container on a NAS.
   </tr>
 </table>
 
-<sub>Gaps view (missing-asset flags) · a curated collection with stats · the per-frontend export dialog · the detail drawer with gameplay video.</sub>
+<sub>A curated multi-system collection with stats · the “Missing ROMs” view diffed against No-Intro/Redump · the per-frontend export dialog (desktop + handheld targets) · the detail drawer with gameplay video, metadata, and rescrape/edit.</sub>
 
 ## What works today
 
