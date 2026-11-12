@@ -1,0 +1,21 @@
+# ROMLoom configuration. Rename this file to romloom.toml and keep it next to
+# romloom.exe. Every line is optional; anything you leave out uses the default.
+# Environment variables (ROMLOOM_*) still override anything set here.
+
+# Path to your ROM library (the folder containing one subfolder per system).
+roms_root = "D:\\ROMs"
+
+# Where exported collections are written.
+output_root = "D:\\Collections"
+
+# App data: the index, thumbnail cache, scrape cache, settings.
+# Defaults to a "config" folder next to the exe if omitted.
+# config_dir = "D:\\ROMLoom\\config"
+
+# Set to "0.0.0.0" to reach ROMLoom from other machines on your network.
+host = "127.0.0.1"
+port = 8096
+
+# Only needed for Skyscraper/ScreenScraper scraping. Point it at Skyscraper.exe.
+# The keyless sources (GameTDB / libretro / IGDB) work without this.
+# skyscraper_bin = "C:\\Tools\\Skyscraper\\Skyscraper.exe"

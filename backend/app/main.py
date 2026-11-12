@@ -1464,9 +1464,22 @@ def game_video(game_id: int):
 
 # Serve the ROMLoom app icon for the legacy /favicon.ico path (modern browsers
 # use the <link rel="icon" href="/favicon.png"> in index.html).
+def _resource_root() -> Path:
+    """Where bundled assets live: PyInstaller's extraction dir (sys._MEIPASS)
+    when frozen, else the backend/ checkout dir."""
+    import sys
+    base = getattr(sys, "_MEIPASS", None)
+    if base:
+        return Path(base)
+    return Path(__file__).resolve().parent.parent
+
+
+_STATIC = _resource_root() / "static"
+
+
 @app.get("/favicon.ico")
 def favicon():
-    png = Path(__file__).resolve().parent.parent / "static" / "favicon.png"
+    png = _STATIC / "favicon.png"
     if png.is_file():
         return FileResponse(png, media_type="image/png")
     return Response(status_code=204)
@@ -1475,7 +1488,6 @@ def favicon():
 # --------------------------------------------------------------------------- #
 # Static frontend (built React app). Mounted last so /api wins.
 # --------------------------------------------------------------------------- #
-_STATIC = Path(__file__).resolve().parent.parent / "static"
 if _STATIC.is_dir():
     app.mount("/", StaticFiles(directory=str(_STATIC), html=True), name="static")
 

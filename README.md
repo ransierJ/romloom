@@ -97,12 +97,18 @@ the thumbnail cache, the scrape cache, and settings.
 
 ## Run without Docker (Windows, macOS, Linux)
 
-The app is plain Python plus a pre-built frontend that's committed in
-`backend/static`, so you don't need Node or Docker to run it. You need Python
-3.12 and, for ScreenScraper scraping, a native Skyscraper binary.
+On Windows the easiest path is the [packaged build](#windows-bundle) — one `.exe`
+with the frontend embedded. To run from source on any OS you need Python 3.12 and
+Node (to build the frontend once), plus a native Skyscraper binary if you want
+ScreenScraper scraping.
 
 ```bash
-cd backend
+# build the frontend once (vite outputs into backend/static)
+cd frontend
+npm ci
+npm run build
+
+cd ../backend
 python -m venv .venv
 . .venv/bin/activate            # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
@@ -117,6 +123,27 @@ python -m app.main               # serves http://127.0.0.1:8096
 
 Set `ROMLOOM_HOST=0.0.0.0` to reach it from other machines on the LAN, and
 `ROMLOOM_PORT` to change the port.
+
+### Windows bundle
+
+A standalone `romloom.exe` (no Python or Node install needed) is built by the
+**Windows bundle** GitHub Actions workflow. Run it from the repo's Actions tab to
+get a downloadable artifact, or push a `v*` tag to attach the exe to a release.
+To build it yourself on a Windows machine, run `scripts/build-windows.ps1` (needs
+Python 3.12 and Node), which produces `backend/dist/romloom.exe`.
+
+Configure it by putting a `romloom.toml` next to the exe (copy
+`backend/romloom.toml.example`):
+
+```toml
+roms_root   = "D:\\ROMs"
+output_root = "D:\\Collections"
+# skyscraper_bin = "C:\\Tools\\Skyscraper\\Skyscraper.exe"  # for ScreenScraper
+```
+
+Double-click the exe: it starts the server, opens your browser, and keeps its
+index and caches in a `config` folder beside itself. Environment variables still
+override anything in the toml.
 
 **Scraping without Docker.** The keyless sources (GameTDB, libretro-thumbnails,
 IGDB) need nothing extra and work on every OS. For Skyscraper/ScreenScraper,

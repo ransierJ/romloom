@@ -1,19 +1,57 @@
-"""Runtime configuration, driven entirely by environment variables.
+"""Runtime configuration.
 
-Nothing is hard-coded to a single machine: point ROMLOOM_ROMS_ROOT at any
-library. Defaults are chosen so the app is also runnable straight from a dev
-checkout against the real NAS mount. The legacy ROMFORGE_* names still work.
+Settings come, in priority order, from: environment variables (ROMLOOM_* then
+legacy ROMFORGE_*), then a romloom.toml next to the executable / working dir,
+then the built-in defaults. The toml layer exists so the packaged Windows build
+can be configured by editing a file beside the .exe — no terminal needed.
 """
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 
+def _app_base() -> Path:
+    """Root for the config file and the default data dirs: next to the frozen
+    executable when packaged (PyInstaller), otherwise the working directory."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path.cwd()
+
+
+def _load_file_conf() -> dict:
+    """Read romloom.toml beside the app, if present. Accepts either flat keys or
+    a [romloom] table. Never raises — a bad/missing file just yields no config."""
+    try:
+        import tomllib  # stdlib on 3.11+
+    except ModuleNotFoundError:
+        return {}
+    p = _app_base() / "romloom.toml"
+    if not p.is_file():
+        return {}
+    try:
+        with p.open("rb") as fh:
+            data = tomllib.load(fh)
+    except Exception:
+        return {}
+    if isinstance(data.get("romloom"), dict):
+        data = data["romloom"]
+    return {str(k).lower(): v for k, v in data.items()}
+
+
+_APP_BASE = _app_base()
+_FILE_CONF = _load_file_conf()
+
+
 def _env(name: str, default: str) -> str:
-    # Prefer the ROMLOOM_* name; fall back to legacy ROMFORGE_* for existing
-    # deployments whose compose still sets the old variables.
-    return os.environ.get(f"ROMLOOM_{name}", os.environ.get(f"ROMFORGE_{name}", default))
+    # Env wins (ROMLOOM_* then legacy ROMFORGE_*), then romloom.toml, then default.
+    for key in (f"ROMLOOM_{name}", f"ROMFORGE_{name}"):
+        if key in os.environ:
+            return os.environ[key]
+    if name.lower() in _FILE_CONF:
+        return str(_FILE_CONF[name.lower()])
+    return default
 
 
 def _path(name: str, default: str) -> Path:
@@ -24,10 +62,10 @@ def _path(name: str, default: str) -> Path:
 ROMS_ROOT: Path = _path("ROMS_ROOT", "/media/jean/Plex3/ROMs")
 
 # Where forged collections are written (Phase 3). Created on demand.
-OUTPUT_ROOT: Path = _path("OUTPUT_ROOT", str(Path.cwd() / "output"))
+OUTPUT_ROOT: Path = _path("OUTPUT_ROOT", str(_APP_BASE / "output"))
 
 # Persistent app state: the SQLite index, the thumbnail cache, settings.
-CONFIG_DIR: Path = _path("CONFIG_DIR", str(Path.cwd() / "config"))
+CONFIG_DIR: Path = _path("CONFIG_DIR", str(_APP_BASE / "config"))
 
 DB_PATH: Path = CONFIG_DIR / "romloom.db"
 THUMB_DIR: Path = CONFIG_DIR / "thumbs"
