@@ -498,9 +498,13 @@ def _place_file(src: Path, dst: Path, size: int, mode: str, prog: Progress) -> N
         dst.unlink()  # size differs — replace the copy
 
     if mode == "symlink":
-        os.symlink(os.path.abspath(src), dst)
-        prog.linked += 1
-        return
+        try:
+            os.symlink(os.path.abspath(src), dst)
+            prog.linked += 1
+            return
+        except OSError:
+            # Windows denies symlinks without admin / developer mode — copy.
+            prog.fell_back += 1
     if mode == "hardlink":
         try:
             os.link(src, dst)
@@ -520,9 +524,14 @@ def _place_dir(src: Path, dst: Path, mode: str, prog: Progress) -> None:
         if dst.exists() or dst.is_symlink():
             return
         dst.parent.mkdir(parents=True, exist_ok=True)
-        os.symlink(os.path.abspath(src), dst)
-        prog.linked += 1
-        return
+        try:
+            os.symlink(os.path.abspath(src), dst)
+            prog.linked += 1
+            return
+        except OSError:
+            # Windows without symlink privilege — recreate the tree as a copy.
+            prog.fell_back += 1
+            mode = "copy"
     for root, _dirs, files in os.walk(src):
         rel = os.path.relpath(root, src)
         target_dir = dst / rel if rel != "." else dst

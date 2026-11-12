@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import signal
 import subprocess
 import threading
@@ -22,6 +23,8 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from . import config
+
+IS_WINDOWS = os.name == "nt"
 
 
 class ScrapeCancelled(Exception):
@@ -50,6 +53,11 @@ class ScrapeControl:
             self._proc = proc
 
     def _signal(self, sig: int) -> None:
+        """POSIX: signal the whole process group (Skyscraper may fork children).
+        No-op on Windows, which has no process-group signals — stop() there uses
+        _terminate_tree() and pause relies on the in-process Event instead."""
+        if IS_WINDOWS:
+            return
         with self._lock:
             p = self._proc
             if p and p.poll() is None:
@@ -58,20 +66,67 @@ class ScrapeControl:
                 except (ProcessLookupError, OSError):
                     pass
 
+    def _terminate_tree(self) -> None:
+        """Windows: kill the Skyscraper process and any children it spawned."""
+        with self._lock:
+            p = self._proc
+            if not (p and p.poll() is None):
+                return
+            try:
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(p.pid)],
+                               capture_output=True)
+            except (OSError, ValueError):
+                try:
+                    p.terminate()
+                except OSError:
+                    pass
+
     def stop(self) -> None:
         self.cancelled = True
-        self._signal(signal.SIGCONT)   # in case it was paused
-        self._signal(signal.SIGTERM)
+        if IS_WINDOWS:
+            self._terminate_tree()
+        else:
+            self._signal(signal.SIGCONT)   # in case it was paused
+            self._signal(signal.SIGTERM)
 
     def pause(self) -> None:
+        # The Event pauses the in-process backends (GameTDB/libretro/IGDB) on
+        # every OS. SIGSTOP additionally freezes the Skyscraper subprocess, but
+        # only exists on POSIX; on Windows that subprocess keeps running.
         self._paused.set()
-        self._signal(signal.SIGSTOP)
+        if not IS_WINDOWS:
+            self._signal(signal.SIGSTOP)
 
     def resume(self) -> None:
         self._paused.clear()
-        self._signal(signal.SIGCONT)
+        if not IS_WINDOWS:
+            self._signal(signal.SIGCONT)
 
-BINARY = "/usr/local/bin/Skyscraper"
+_DOCKER_BINARY = "/usr/local/bin/Skyscraper"   # where the Dockerfile installs it
+
+
+def binary() -> str:
+    """Resolve the Skyscraper executable: explicit ROMLOOM_SKYSCRAPER_BIN, then
+    the bundled Docker path, then whatever is on PATH (Skyscraper /
+    Skyscraper.exe). Falls back to the Docker path so available() reports False
+    cleanly when nothing is installed."""
+    if config.SKYSCRAPER_BIN:
+        return config.SKYSCRAPER_BIN
+    if Path(_DOCKER_BINARY).is_file():
+        return _DOCKER_BINARY
+    return shutil.which("Skyscraper") or _DOCKER_BINARY
+
+
+def _sky_env() -> dict:
+    """Environment for the Skyscraper subprocess. Point HOME at CONFIG_DIR so
+    Skyscraper's ~/.skyscraper (config.ini, artwork.xml, scrape cache) lands on
+    the config volume on any host — matching the Docker HOME=/config layout. On
+    Windows set USERPROFILE too, which is what Qt treats as home there."""
+    env = dict(os.environ)
+    env["HOME"] = str(config.CONFIG_DIR)
+    if IS_WINDOWS:
+        env["USERPROFILE"] = str(config.CONFIG_DIR)
+    return env
 
 # ROMLoom canonical id -> Skyscraper platform id, only where they differ. Ids
 # not listed fall through to the canonical id if Skyscraper knows it (see _VALID).
@@ -114,7 +169,8 @@ _PROGRESS_RE = re.compile(r"#(\d+)/(\d+)")
 
 
 def available() -> bool:
-    return Path(BINARY).is_file()
+    b = binary()
+    return Path(b).is_file() or shutil.which(b) is not None
 
 
 def platform(system_id: str) -> Optional[str]:
@@ -158,7 +214,8 @@ def configure(user: str, password: str, region: str = "us", lang: str = "en") ->
     if not _SKY_HOME.exists():
         # Let Skyscraper populate its data dir (peas.json, aliasMap, …) once.
         try:
-            subprocess.run([BINARY, "--version"], capture_output=True, timeout=30)
+            subprocess.run([binary(), "--version"], capture_output=True,
+                           timeout=30, env=_sky_env())
         except Exception:
             pass
     _write_config(user, password, region, lang)
@@ -170,9 +227,14 @@ def _run(args: list, on_line: Optional[Callable[[str], None]],
     where tail is the last ~25 output lines (for surfacing real errors). Runs in
     its own session so the control object can signal the whole process group."""
     tail: deque = deque(maxlen=25)
+    # Run in its own group so ScrapeControl can stop the whole tree: a new
+    # session on POSIX, a new process group on Windows. HOME is redirected to
+    # CONFIG_DIR via _sky_env so config + cache stay off the user's home dir.
+    group_kw = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+                if IS_WINDOWS else {"start_new_session": True})
     proc = subprocess.Popen(
-        [BINARY, *args], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, bufsize=1, start_new_session=True,
+        [binary(), *args], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, bufsize=1, env=_sky_env(), **group_kw,
     )
     if control:
         control._attach(proc)

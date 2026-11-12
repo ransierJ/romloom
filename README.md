@@ -95,6 +95,50 @@ gamelist back into the library, where a scraper would put them). Everything else
 lives in `/config` and is never written to your source library: the SQLite index,
 the thumbnail cache, the scrape cache, and settings.
 
+## Run without Docker (Windows, macOS, Linux)
+
+The app is plain Python plus a pre-built frontend that's committed in
+`backend/static`, so you don't need Node or Docker to run it. You need Python
+3.12 and, for ScreenScraper scraping, a native Skyscraper binary.
+
+```bash
+cd backend
+python -m venv .venv
+. .venv/bin/activate            # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+
+# point it at your library (set these as real paths for your OS)
+export ROMLOOM_ROMS_ROOT="/path/to/ROMs"      # Windows: set ROMLOOM_ROMS_ROOT=D:\ROMs
+export ROMLOOM_OUTPUT_ROOT="/path/to/Collections"
+export ROMLOOM_CONFIG_DIR="/path/to/config"   # index + caches; created if missing
+
+python -m app.main               # serves http://127.0.0.1:8096
+```
+
+Set `ROMLOOM_HOST=0.0.0.0` to reach it from other machines on the LAN, and
+`ROMLOOM_PORT` to change the port.
+
+**Scraping without Docker.** The keyless sources (GameTDB, libretro-thumbnails,
+IGDB) need nothing extra and work on every OS. For Skyscraper/ScreenScraper,
+install the Skyscraper binary natively:
+
+- **Linux / macOS:** build it from the [Skyscraper](https://github.com/Gemba/skyscraper)
+  source (its installer drops `Skyscraper` on your `PATH`), and ROMLoom finds it
+  automatically.
+- **Windows:** download a Skyscraper Windows build and set
+  `ROMLOOM_SKYSCRAPER_BIN` to the full path of `Skyscraper.exe`.
+
+ROMLoom redirects Skyscraper's config and scrape cache into `ROMLOOM_CONFIG_DIR`
+(not your home folder), so everything stays together. If the binary isn't found,
+the scrape buttons simply don't appear and the rest of the app works normally.
+
+**Platform notes.**
+- Scrape pause/resume freezes the Skyscraper process on Linux and macOS. On
+  Windows the subprocess can't be frozen, so pause only holds the keyless
+  sources; stop still ends a Skyscraper run cleanly.
+- Export copy and hardlink modes work everywhere. Symlink mode needs admin or
+  Developer Mode on Windows; without it, those files quietly fall back to a copy.
+
 ## Scraping
 
 Scrape a whole system (⬇ scrape in the toolbar), a single game (⟳ Rescrape in its
@@ -197,7 +241,9 @@ Each target is written under `OUTPUT_ROOT/<collection>/<target>/`:
 | `ROMLOOM_ROMS_ROOT` | `/roms` | Source library |
 | `ROMLOOM_OUTPUT_ROOT` | `/output` | Where collections are written |
 | `ROMLOOM_CONFIG_DIR` | `/config` | SQLite index, thumbnail and scrape cache, settings |
+| `ROMLOOM_HOST` | `127.0.0.1` | Interface to bind (Docker's CMD overrides this to `0.0.0.0`) |
 | `ROMLOOM_PORT` | `8096` | HTTP port |
+| `ROMLOOM_SKYSCRAPER_BIN` | _(auto)_ | Path to a native Skyscraper binary; auto-detected on `PATH` when unset |
 
 ## Layout it expects
 

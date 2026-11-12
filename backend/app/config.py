@@ -120,6 +120,14 @@ THUMB_WARM_WIDTHS = {"cover": (320, 120), "screenshot": (200,)}
 COMPLETE_REQUIRES = ("cover", "screenshot", "textual")
 
 HTTP_PORT: int = int(_env("PORT", "8096"))
+# Interface to bind. Docker's CMD passes --host 0.0.0.0 explicitly; a bare
+# (non-Docker) run defaults to loopback so the app isn't exposed by accident.
+HTTP_HOST: str = _env("HOST", "127.0.0.1")
+
+# Path to a native Skyscraper binary. Empty => auto-detect: the bundled Docker
+# path, then whatever is on PATH (Skyscraper / Skyscraper.exe). Set this when it
+# lives somewhere non-standard (e.g. a Windows install dir).
+SKYSCRAPER_BIN: str = _env("SKYSCRAPER_BIN", "")
 
 
 def ensure_dirs() -> None:

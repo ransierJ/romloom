@@ -1478,3 +1478,15 @@ def favicon():
 _STATIC = Path(__file__).resolve().parent.parent / "static"
 if _STATIC.is_dir():
     app.mount("/", StaticFiles(directory=str(_STATIC), html=True), name="static")
+
+
+# --------------------------------------------------------------------------- #
+# Bare-metal launcher: `python -m app.main` (from backend/) starts the server on
+# any OS without memorizing uvicorn flags. Docker keeps using its own uvicorn
+# CMD. Host defaults to loopback (config.HTTP_HOST); set ROMLOOM_HOST=0.0.0.0 to
+# expose it on the LAN.
+# --------------------------------------------------------------------------- #
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host=config.HTTP_HOST, port=config.HTTP_PORT)
