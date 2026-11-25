@@ -49,8 +49,14 @@
   IGDB for Xbox, 360, and PS3 text metadata.
 - Manual metadata and art editing for anything a scraper can't identify: ROM
   hacks, translations, obscure dumps.
-- A "Missing ROMs" view that diffs your library against the full No-Intro and
-  Redump catalogs.
+- Arcade (MAME) filtering: hide adult/mature sets, hide import-only sets (keep
+  US/World), and filter by category (Fighter, Shooter, Puzzle…). Driven by the
+  progettosnaps catver.ini and the MAME DAT, matched by set name.
+- Hash verification: ROMs are fingerprinted (CRC32/SHA1) and checked against the
+  No-Intro database, so you can see which dumps are the correct, complete version.
+  Handles copier/iNES headers and N64 byte order, so SNES/NES/N64 verify too.
+- A "Missing ROMs" view that diffs your library against the full No-Intro
+  (cartridge), Redump (disc), and MAME (arcade) catalogs.
 - Collections, hand-picked or smart (rule-based and auto-populated), exported for
   desktop frontends and for handhelds (muOS, MinUI, Knulli, ROCKNIX, AmberELEC)
   with each device's native favorites file.
@@ -193,15 +199,39 @@ ROMLoom picks the source per system automatically. There's no per-game setup.
 - Credentials live in ⚙ Settings (ScreenScraper login, preferred region, IGDB
   Client ID and Secret) and are masked on read.
 
-## Editing and the "Missing ROMs" view
+## Editing, verifying, and the "Missing ROMs" view
 
 - Edit (✎ in the drawer) sets name, description, developer, genre, and so on, and
   uploads cover or screenshot art. It writes a `textual/*.xml` plus the image into
   the library. Unlike a scraper, this works for ROM hacks no database knows, and
   it survives rescans and flows into exports.
-- The Missing section pulls the No-Intro (cartridge) and Redump (disc) catalogs
-  via the libretro-database mirror and diffs them against what's on disk. It
-  defaults to retail USA titles. Each missing title has a one-click Google search.
+- Verify (on cartridge systems) fingerprints each ROM (CRC32/SHA1) and checks it
+  against the No-Intro database. The drawer then shows a ✓ No-Intro badge and the
+  CRC, or marks a ROM unverified. It normalizes copier/iNES headers and N64 byte
+  order first, so SNES/NES/N64 match whether your dumps are headered or not.
+- The Missing section diffs your library against the complete catalogs: No-Intro
+  (cartridge) and Redump (disc) via the libretro-database mirror, and the MAME DAT
+  (arcade). It defaults to retail USA titles, and each missing title has a
+  one-click Google search.
+
+## Arcade (MAME)
+
+Arcade sets are identified by their MAME short name (the zip name), so ROMLoom
+joins them against the progettosnaps support files instead of a hash database.
+
+- Filter the library with Hide adult, US/World, and a Category dropdown (Fighter,
+  Shooter, Puzzle…). Hide adult uses catver.ini's mature flag; US/World hides
+  import-only sets; the categories come from catver.ini.
+- The Missing view for arcade diffs against the full MAME DAT, filtered by default
+  to parent sets, US/World, non-adult, and sensible categories (no mahjong,
+  casino, or electromechanical). Toggles let you include clones, adult, import,
+  or those categories.
+- US/World uses real region from the MAME DAT once it's downloaded, and falls back
+  to a text-language heuristic until then.
+- Data is fetched on demand to `/config/mame` (catver.ini + languages.ini are
+  small; the full MAME DAT is ~34 MB and downloads when you first open the arcade
+  Missing view). You can also drop your own copies there and ROMLoom won't
+  overwrite them. Defaults for the two arcade toggles live in ⚙ Settings.
 
 ## Collections
 
