@@ -219,6 +219,10 @@ ROMLoom picks the source per system automatically. There's no per-game setup.
 Arcade sets are identified by their MAME short name (the zip name), so ROMLoom
 joins them against the progettosnaps support files instead of a hash database.
 
+![Arcade library with the hide-adult, US/World, and category filters](docs/arcade.png)
+
+![Arcade Missing view diffed against the MAME DAT](docs/arcade-missing.png)
+
 - Filter the library with Hide adult, US/World, and a Category dropdown (Fighter,
   Shooter, Puzzle…). Hide adult uses catver.ini's mature flag; US/World hides
   import-only sets; the categories come from catver.ini.
