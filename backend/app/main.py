@@ -415,6 +415,7 @@ def _game_dict(r) -> dict:
         "players": r["players"],
         "region": r["region"],
         "mame_cat": r["mame_cat"] if "mame_cat" in k else None,
+        "mame_region": r["mame_region"] if "mame_region" in k else None,
         "is_mature": bool(r["is_mature"]) if "is_mature" in k else False,
         "crc32": r["crc32"] if "crc32" in k else None,
         "sha1": r["sha1"] if "sha1" in k else None,
@@ -475,10 +476,12 @@ def _games_where(system_id: str, search: str, coverage: Optional[str],
         where.append("g.mame_cat = ?")
         params.append(category)
     if usa_only:
-        # Hide sets whose text language marks them import-only (Japan/Asia); keep
-        # English and language-neutral (NULL) sets. Approximate by design.
+        # Prefer real region from ARCADE.dat (mame_region) when it's known; else
+        # fall back to the languages.ini proxy (hide Japan/Asia-language sets).
         ph = ",".join("?" for _ in mame.NON_US_LANGS)
-        where.append(f"(g.mame_lang IS NULL OR g.mame_lang NOT IN ({ph}))")
+        where.append(
+            "(g.mame_region = 'US' OR (g.mame_region IS NULL "
+            f"AND (g.mame_lang IS NULL OR g.mame_lang NOT IN ({ph}))))")
         params += sorted(mame.NON_US_LANGS)
     return " AND ".join(where), params
 
@@ -538,6 +541,10 @@ def refresh_catalog(system_id: str):
             mame.fetch_dat(force=True)   # ~34 MB ARCADE.dat, on demand
         except Exception as e:  # noqa: BLE001
             raise HTTPException(502, f"could not fetch MAME dat: {e}")
+        # Backfill real region onto already-indexed arcade games so the library
+        # US/World filter upgrades immediately, without waiting for a rescan.
+        mame.apply_region(_conn)
+        _conn.commit()
         return {"ok": True, "source": "MAME", **mame.dat_meta()}
     if not catalog.available(system_id):
         raise HTTPException(404, "no reference catalog exists for this system")

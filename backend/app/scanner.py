@@ -438,12 +438,18 @@ def _scan_system(conn, sys_dir: os.DirEntry, signature: str = "") -> tuple[int, 
     # Arcade: pull the MAME set -> (category, mature, language) map once, keyed by
     # the zip stem. Empty for non-arcade systems or when no support files exist.
     arcade_meta: Dict[str, tuple] = {}
+    arcade_dat: Dict[str, dict] = {}
     if plat.canonical in mame.ARCADE_SYSTEMS:
         arcade_meta = {
             r["set_name"]: (r["top_cat"], r["is_mature"], r["language"])
             for r in conn.execute(
                 "SELECT set_name, top_cat, is_mature, language FROM arcade_catalog")
         }
+        # Real region (from the downloaded ARCADE.dat) upgrades the US/World
+        # filter; empty until the user has downloaded the dat, then it falls
+        # back to the languages.ini proxy.
+        if mame.dat_available():
+            arcade_dat = mame.load_dat()
 
     # Cartridge (No-Intro): hash each ROM and, when the system's DAT is already
     # cached, resolve the hash to a canonical title. We never force-fetch the DAT
@@ -510,6 +516,8 @@ def _scan_system(conn, sys_dir: os.DirEntry, signature: str = "") -> tuple[int, 
         mame_cat = am[0] if am else None
         is_mature = int(am[1]) if am else 0
         mame_lang = am[2] if am else None
+        di = arcade_dat.get(rom.stem.lower()) if arcade_dat else None
+        mame_region = ("US" if di["us"] else "NONUS") if di else None
 
         # Cartridge hashing + verification (single-file ROMs only). A match on
         # either the raw or the header/byte-order-normalized hash counts.
@@ -534,7 +542,7 @@ def _scan_system(conn, sys_dir: os.DirEntry, signature: str = "") -> tuple[int, 
             meta.get("releasedate"), meta.get("developer"), meta.get("publisher"),
             meta.get("genre"), meta.get("players"),
             cover, shot, wheel, marquee, video_name, _parse_region(rom.filename),
-            int(has_textual), is_mature, mame_cat, mame_lang,
+            int(has_textual), is_mature, mame_cat, mame_lang, mame_region,
             crc32, sha1, norm_crc, norm_sha, dat_match, verified, cov,
         ))
 
@@ -543,8 +551,8 @@ def _scan_system(conn, sys_dir: os.DirEntry, signature: str = "") -> tuple[int, 
         "(system_id, rom_filename, stem, ext, size_bytes,"
         " name, description, rating, releasedate, developer, publisher, genre, players,"
         " cover_file, screenshot_file, wheel_file, marquee_file, video_file, region, has_textual,"
-        " is_mature, mame_cat, mame_lang, crc32, sha1, norm_crc32, norm_sha1, dat_match, verified, coverage) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        " is_mature, mame_cat, mame_lang, mame_region, crc32, sha1, norm_crc32, norm_sha1, dat_match, verified, coverage) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         rows,
     )
     conn.execute(

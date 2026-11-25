@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS games (
     is_mature       INTEGER NOT NULL DEFAULT 0,
     mame_cat        TEXT,              -- top-level catver category, e.g. "Shooter"
     mame_lang       TEXT,              -- languages.ini language (US-availability proxy)
+    mame_region     TEXT,              -- 'US' / 'NONUS' from ARCADE.dat, when downloaded
 
     -- cartridge identity (M2): whole-file hashes + No-Intro match result
     crc32           TEXT,
@@ -203,6 +204,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE games ADD COLUMN mame_cat TEXT")
     if gcols and "mame_lang" not in gcols:
         conn.execute("ALTER TABLE games ADD COLUMN mame_lang TEXT")
+    if gcols and "mame_region" not in gcols:
+        conn.execute("ALTER TABLE games ADD COLUMN mame_region TEXT")
     for col, decl in (("crc32", "TEXT"), ("sha1", "TEXT"),
                       ("norm_crc32", "TEXT"), ("norm_sha1", "TEXT"),
                       ("dat_match", "TEXT"), ("verified", "INTEGER")):

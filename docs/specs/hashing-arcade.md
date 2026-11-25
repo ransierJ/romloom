@@ -109,10 +109,13 @@ Incremental scan unaffected (skipped systems keep rows; rescanned pull from cach
     `norm_crc32`/`norm_sha1` beside the raw hash (cached), and verification
     matches on **either** — so these systems now verify regardless of whether the
     No-Intro set is headered or headerless.
-  - ☐ **Disc/Redump multi-track hashing** — not started (heavy over NAS; low ROI).
-  - ☐ **DAT region into the live arcade library filter** — not started (the
-    Missing view already uses real region; the live filter stays on the language
-    proxy).
+  - ✅ **DAT region into the live arcade library filter** done: scan stores
+    `games.mame_region` ('US'/'NONUS') from ARCADE.dat when downloaded;
+    `mame.apply_region()` backfills it the moment the dat is fetched (no rescan);
+    the library US/World filter prefers real region and falls back to the
+    languages.ini proxy only where region is unknown.
+  - ☐ **Disc/Redump multi-track hashing** — not started (heavy over NAS; low ROI);
+    documented non-goal for now.
 
 ## Locked decisions
 1. MAME data: auto-fetch from pinned mirror AND honor user-dropped files in

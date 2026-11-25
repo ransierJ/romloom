@@ -322,6 +322,35 @@ def load_dat() -> Dict[str, dict]:
     return out
 
 
+def region_label(set_name: str) -> Optional[str]:
+    """'US' / 'NONUS' from ARCADE.dat for one set, or None if the dat isn't
+    downloaded or the set is unknown. Per-set region (no family rollup) — the
+    library filter judges the exact set the user owns."""
+    di = load_dat().get(set_name.lower())
+    if not di:
+        return None
+    return "US" if di["us"] else "NONUS"
+
+
+def apply_region(conn) -> int:
+    """Set games.mame_region for every arcade game from ARCADE.dat (if present),
+    so the library US/World filter reflects real region without a full rescan.
+    Returns the number of rows updated."""
+    dat = load_dat()
+    if not dat:
+        return 0
+    rows = conn.execute(
+        "SELECT id, stem, system_id FROM games WHERE system_id IN (%s)"
+        % ",".join("?" for _ in ARCADE_SYSTEMS), tuple(ARCADE_SYSTEMS)).fetchall()
+    n = 0
+    for r in rows:
+        di = dat.get(r["stem"].lower())
+        region = ("US" if di["us"] else "NONUS") if di else None
+        conn.execute("UPDATE games SET mame_region=? WHERE id=?", (region, r["id"]))
+        n += 1
+    return n
+
+
 def arcade_missing(have_sets, *, include_clones=False, include_mature=False,
                    include_nonus=False, include_junk=False) -> dict:
     """Diff the arcade library against ARCADE.dat. `have_sets` is the set of
