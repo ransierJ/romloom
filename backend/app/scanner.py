@@ -511,17 +511,21 @@ def _scan_system(conn, sys_dir: os.DirEntry, signature: str = "") -> tuple[int, 
         is_mature = int(am[1]) if am else 0
         mame_lang = am[2] if am else None
 
-        # Cartridge hashing + verification (single-file ROMs only).
-        crc32 = sha1 = dat_match = verified = None
+        # Cartridge hashing + verification (single-file ROMs only). A match on
+        # either the raw or the header/byte-order-normalized hash counts.
+        crc32 = sha1 = norm_crc = norm_sha = dat_match = verified = None
         if is_cart and not rom.alt_stem:
             fp = sys_path / rom.filename
             try:
                 mtime = fp.stat().st_mtime
             except OSError:
                 mtime = 0
-            crc32, sha1 = hashing.file_hashes(conn, fp, rom.size, mtime)
+            crc32, sha1, norm_crc, norm_sha = hashing.file_hashes(
+                conn, fp, rom.size, mtime, plat.canonical)
             if crc32 is not None and (crc_idx or sha_idx):
-                dat_match = crc_idx.get(crc32) or (sha_idx.get(sha1) if sha1 else None)
+                dat_match = (crc_idx.get(crc32) or (crc_idx.get(norm_crc) if norm_crc else None)
+                             or (sha_idx.get(sha1) if sha1 else None)
+                             or (sha_idx.get(norm_sha) if norm_sha else None))
                 verified = 1 if dat_match else 0
 
         rows.append((
@@ -531,7 +535,7 @@ def _scan_system(conn, sys_dir: os.DirEntry, signature: str = "") -> tuple[int, 
             meta.get("genre"), meta.get("players"),
             cover, shot, wheel, marquee, video_name, _parse_region(rom.filename),
             int(has_textual), is_mature, mame_cat, mame_lang,
-            crc32, sha1, dat_match, verified, cov,
+            crc32, sha1, norm_crc, norm_sha, dat_match, verified, cov,
         ))
 
     conn.executemany(
@@ -539,8 +543,8 @@ def _scan_system(conn, sys_dir: os.DirEntry, signature: str = "") -> tuple[int, 
         "(system_id, rom_filename, stem, ext, size_bytes,"
         " name, description, rating, releasedate, developer, publisher, genre, players,"
         " cover_file, screenshot_file, wheel_file, marquee_file, video_file, region, has_textual,"
-        " is_mature, mame_cat, mame_lang, crc32, sha1, dat_match, verified, coverage) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        " is_mature, mame_cat, mame_lang, crc32, sha1, norm_crc32, norm_sha1, dat_match, verified, coverage) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         rows,
     )
     conn.execute(

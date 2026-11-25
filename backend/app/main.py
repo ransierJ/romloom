@@ -709,11 +709,16 @@ def verify_system(system_id: str):
     crc_idx, sha_idx = catalog.parse_hashes(text)
 
     verified = unverified = unhashed = 0
-    for r in _conn.execute("SELECT id, crc32, sha1 FROM games WHERE system_id=?", (system_id,)):
+    for r in _conn.execute(
+            "SELECT id, crc32, sha1, norm_crc32, norm_sha1 FROM games WHERE system_id=?",
+            (system_id,)):
         if not r["crc32"]:
             unhashed += 1
             continue
-        name = crc_idx.get(r["crc32"]) or (sha_idx.get(r["sha1"]) if r["sha1"] else None)
+        name = (crc_idx.get(r["crc32"])
+                or (crc_idx.get(r["norm_crc32"]) if r["norm_crc32"] else None)
+                or (sha_idx.get(r["sha1"]) if r["sha1"] else None)
+                or (sha_idx.get(r["norm_sha1"]) if r["norm_sha1"] else None))
         if name:
             _conn.execute("UPDATE games SET verified=1, dat_match=? WHERE id=?", (name, r["id"]))
             verified += 1

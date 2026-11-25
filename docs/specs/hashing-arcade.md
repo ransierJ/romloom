@@ -102,9 +102,17 @@ Incremental scan unaffected (skipped systems keep rows; rescanned pull from cach
     library-view "US/World" filter stays on the M1 language proxy (keeping M3
     free of schema/scanner changes). Wiring DAT region into the live filter is a
     small follow-up if wanted.
-- **M4 — optional**: disc/Redump multi-track hashing; headered/byteswap
-  normalization so NES/SNES/N64 verify correctly; DAT region into the live
-  arcade library filter.
+- **M4 — optional tail** (in progress):
+  - ✅ **Header/byte-order normalization** done: `normalize.py` canonicalizes
+    SNES (512 copier header), NES (iNES), N64 (v64/n64→z64), Atari Lynx (.lnx),
+    Atari 7800 (.a78), and Genesis (.smd de-interleave). The scanner stores a
+    `norm_crc32`/`norm_sha1` beside the raw hash (cached), and verification
+    matches on **either** — so these systems now verify regardless of whether the
+    No-Intro set is headered or headerless.
+  - ☐ **Disc/Redump multi-track hashing** — not started (heavy over NAS; low ROI).
+  - ☐ **DAT region into the live arcade library filter** — not started (the
+    Missing view already uses real region; the live filter stays on the language
+    proxy).
 
 ## Locked decisions
 1. MAME data: auto-fetch from pinned mirror AND honor user-dropped files in
