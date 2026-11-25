@@ -27,7 +27,7 @@ from . import (catalog, config, db, export, gametdb, igdb, libretro, mame,
                platforms, scanner, scraper, settings, thumbnails)
 from .scanner import scan
 
-app = FastAPI(title="ROMLoom", version="1.0.0")
+app = FastAPI(title="ROMLoom", version="1.1.0")
 
 # A single shared connection is fine: SQLite in WAL mode handles our read-mostly,
 # single-writer access pattern, and FastAPI's threadpool is modest.

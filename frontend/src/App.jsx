@@ -417,7 +417,7 @@ export default function App() {
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
-          <img className="mark" src="/favicon.png" alt="" width="28" height="28" /><b>ROMLOOM</b><span className="ver">v1.0.0</span>
+          <img className="mark" src="/favicon.png" alt="" width="28" height="28" /><b>ROMLOOM</b><span className="ver">v1.1.0</span>
         </div>
         <div className="tabs">
           <button className={mode === 'library' ? 'on' : ''} onClick={() => setMode('library')}>Systems</button>
