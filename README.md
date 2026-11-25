@@ -277,6 +277,7 @@ Each target is written under `OUTPUT_ROOT/<collection>/<target>/`:
 | Retrobat | `roms/<sys>/<rom>` | `roms/<sys>/images/<stem>-…` | `roms/<sys>/gamelist.xml` |
 | muOS | `ROMS/<sys>/<rom>` | `MUOS/info/catalogue/<sys>/{box,preview}/<stem>.png` | collection + `Favourite.cfg` |
 | MinUI / NextUI | `Roms/<Name> (TAG)/<rom>` | `…/.res/<stem>.png` | `Collections/*.txt` favorites |
+| NeoStation | `<sys>/<rom>` (NeoStation ids) | — (scrapes its own) | — (its own DB + multi-disc `.m3u`) |
 
 - `<sys>` is translated from your folder name via the platform map
   (`Nintendo - Super Nintendo…` → `snes`). Edit it per-system with ⚙ mapping.

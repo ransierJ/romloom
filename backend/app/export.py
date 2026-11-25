@@ -22,7 +22,7 @@ from typing import Callable, Dict, List, Optional
 from . import config
 from .scanner import _index_media  # reuse tolerant media-folder resolution
 
-TARGETS = ("raw", "es-de", "batocera", "retrobat", "muos", "minui")
+TARGETS = ("raw", "es-de", "batocera", "retrobat", "muos", "minui", "neostation")
 
 # ES-family targets write a gamelist.xml and read <favorite>true</favorite>; this
 # covers Knulli / ROCKNIX / AmberELEC / Batocera handhelds too.
@@ -46,6 +46,27 @@ _MINUI_TAG = {
 
 def _minui_tag(row) -> str:
     return _MINUI_TAG.get(row["system_id"], row["system_id"].upper())
+
+
+# NeoStation (github.com/misobadev/neostation-frontend) scans ROM folders named
+# by its own short platform id (assets/systems/<id>.json). It scrapes media and
+# organizes multi-disc games (.m3u) on-device, so the export is ROMs only, in
+# these folders. Unlisted systems fall back to the ROMLoom canonical id, which
+# NeoStation often shares (snes, nes, gba, n64, dos, cps1/2/3, fbneo, neogeo…).
+_NEOSTATION = {
+    "atari2600": "2600", "atari5200": "5200", "atari7800": "7800",
+    "atarijaguar": "jag", "atarijaguarcd": "jagcd", "atarilynx": "lynx",
+    "nds": "ds", "virtualboy": "vb", "sega32x": "32x", "dreamcast": "dc",
+    "gamegear": "gg", "mastersystem": "sms", "saturn": "sat", "psx": "ps1",
+    "segacd": "mcd", "arcade": "mame", "neogeocd": "ngcd", "tg16cd": "tgcd",
+    "colecovision": "cv", "intellivision": "intv", "gameandwatch": "gw",
+    "odyssey2": "o2", "x68000": "sharpx68000", "sg1000": "sg1k",
+    "channelf": "chf", "supergrafx": "pce", "pcengine": "pce",
+}
+
+
+def _neo_id(row) -> str:
+    return _NEOSTATION.get(row["system_id"], row["system_id"])
 
 
 def _minui_dir(row) -> str:
@@ -258,6 +279,10 @@ def _target_paths(target: str, row) -> tuple:
     if target == "minui":
         rom = _minui_dir(row)
         return rom, f"{rom}/.res", None    # art in a .res/ folder beside the ROMs
+    if target == "neostation":
+        # ROMs only, in NeoStation's short platform folder. It scrapes media and
+        # builds multi-disc .m3u playlists itself, so no media/gamelist here.
+        return _neo_id(row), None, None
     raise ValueError(target)
 
 
@@ -271,7 +296,8 @@ def _build_system(plan: Plan, system_id: str, grows: list, target: str, assets: 
     # Raw needs the textual xml; videos aren't indexed, so build tolerant
     # per-system indexes once for whatever this export needs.
     textual_idx = _index_media(media_root, ("textual",)) if target == "raw" else None
-    video_idx = _index_media(media_root, config.VIDEO_CANDIDATES) if "video" in assets else None
+    video_idx = (_index_media(media_root, config.VIDEO_CANDIDATES)
+                 if ("video" in assets and target != "neostation") else None)
 
     entries = []
     for r in grows:
@@ -393,6 +419,8 @@ def _safe_size(p: Path) -> int:
 def _media_dst(target: str, media_dir_rel: str, asset: str, stem: str,
                filename: str, ext: str) -> Optional[str]:
     """Where a given asset lands for a target (None = not used by this target)."""
+    if target == "neostation":
+        return None       # NeoStation scrapes its own media
     if target == "raw":
         # Passthrough: keep Skyscraper's own folder + original filename.
         return f"{media_dir_rel}/{_SKY_DIR[asset]}/{filename}"

@@ -9,6 +9,7 @@ const TARGETS = [
   { id: 'retrobat', name: 'Retrobat', hint: 'roms/<sys>/ + images/ + gamelist.xml (Windows ES). Favorites in gamelist.' },
   { id: 'muos', name: 'muOS', hint: 'ROMS/<sys>/ + MUOS/info/catalogue art + collection & Favourite .cfg. (handheld)' },
   { id: 'minui', name: 'MinUI / NextUI', hint: 'Roms/<Name> (TAG)/ + .res/ art + Collections/*.txt favorites. (handheld)' },
+  { id: 'neostation', name: 'NeoStation', hint: 'ROMs only in <sys>/ (NeoStation ids). It scrapes media and builds multi-disc .m3u itself.' },
 ]
 const ASSETS = ['cover', 'screenshot', 'wheel', 'marquee', 'video']
 const MODES = [
