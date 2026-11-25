@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
-from . import config
+from . import config, platforms
 from .scanner import _index_media  # reuse tolerant media-folder resolution
 
 TARGETS = ("raw", "es-de", "batocera", "retrobat", "muos", "minui", "neostation")
@@ -49,24 +49,16 @@ def _minui_tag(row) -> str:
 
 
 # NeoStation (github.com/misobadev/neostation-frontend) scans ROM folders named
-# by its own short platform id (assets/systems/<id>.json). It scrapes media and
-# organizes multi-disc games (.m3u) on-device, so the export is ROMs only, in
-# these folders. Unlisted systems fall back to the ROMLoom canonical id, which
-# NeoStation often shares (snes, nes, gba, n64, dos, cps1/2/3, fbneo, neogeo…).
-_NEOSTATION = {
-    "atari2600": "2600", "atari5200": "5200", "atari7800": "7800",
-    "atarijaguar": "jag", "atarijaguarcd": "jagcd", "atarilynx": "lynx",
-    "nds": "ds", "virtualboy": "vb", "sega32x": "32x", "dreamcast": "dc",
-    "gamegear": "gg", "mastersystem": "sms", "saturn": "sat", "psx": "ps1",
-    "segacd": "mcd", "arcade": "mame", "neogeocd": "ngcd", "tg16cd": "tgcd",
-    "colecovision": "cv", "intellivision": "intv", "gameandwatch": "gw",
-    "odyssey2": "o2", "x68000": "sharpx68000", "sg1000": "sg1k",
-    "channelf": "chf", "supergrafx": "pce", "pcengine": "pce",
-}
-
-
+# by its own short platform id. It scrapes media and organizes multi-disc games
+# (.m3u) on-device, so the export is ROMs only, in these folders. The id comes
+# from the systems table (set per-system via the mapping editor / platform map);
+# fall back to the shared NEOSTATION_IDS default, then the canonical id.
 def _neo_id(row) -> str:
-    return _NEOSTATION.get(row["system_id"], row["system_id"])
+    try:
+        stored = row["neostation_id"]
+    except (KeyError, IndexError):
+        stored = None
+    return stored or platforms.NEOSTATION_IDS.get(row["system_id"]) or row["system_id"]
 
 
 def _minui_dir(row) -> str:
@@ -207,7 +199,7 @@ def build_plan(conn, collection_id: int, target: str,
         raise ValueError("Unknown collection")
 
     rows = conn.execute(
-        "SELECT g.*, s.folder, s.display_name, s.es_id, s.batocera_id, s.retrobat_id, "
+        "SELECT g.*, s.folder, s.display_name, s.es_id, s.batocera_id, s.retrobat_id, s.neostation_id, "
         "u.favorite AS u_favorite "
         "FROM collection_games cg "
         "JOIN games g ON g.system_id=cg.system_id AND g.rom_filename=cg.rom_filename "

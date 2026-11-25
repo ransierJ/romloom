@@ -59,7 +59,7 @@ def _apply_overrides(conn) -> None:
     """Apply per-system mapping overrides on top of the built-in platform map."""
     for r in conn.execute("SELECT * FROM system_overrides"):
         sets, params = [], []
-        for col in ("display_name", "es_id", "batocera_id", "retrobat_id"):
+        for col in ("display_name", "es_id", "batocera_id", "retrobat_id", "neostation_id"):
             if r[col] is not None:
                 sets.append(f"{col} = ?")
                 params.append(r[col])
@@ -422,10 +422,10 @@ def _scan_system(conn, sys_dir: os.DirEntry, signature: str = "") -> tuple[int, 
 
     conn.execute(
         "INSERT OR REPLACE INTO systems"
-        "(id, folder, display_name, known, es_id, batocera_id, retrobat_id) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "(id, folder, display_name, known, es_id, batocera_id, retrobat_id, neostation_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (plat.canonical, sys_dir.name, plat.display, int(plat.known),
-         plat.es, plat.batocera, plat.retrobat),
+         plat.es, plat.batocera, plat.retrobat, plat.neostation),
     )
     conn.execute("DELETE FROM games WHERE system_id = ?", (plat.canonical,))
 

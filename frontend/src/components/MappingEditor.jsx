@@ -6,6 +6,7 @@ const FIELDS = [
   { key: 'es_id', label: 'ES-DE system id' },
   { key: 'batocera_id', label: 'Batocera system id' },
   { key: 'retrobat_id', label: 'Retrobat system id' },
+  { key: 'neostation_id', label: 'NeoStation system id' },
 ]
 
 // Edit the per-system platform mapping used by export (folder -> frontend ids).
@@ -34,7 +35,7 @@ export default function MappingEditor({ systemId, onClose, onSaved }) {
   const reset = async () => {
     setSaving(true)
     try {
-      const d = await api.patchSystemMapping(systemId, { display_name: '', es_id: '', batocera_id: '', retrobat_id: '' })
+      const d = await api.patchSystemMapping(systemId, { display_name: '', es_id: '', batocera_id: '', retrobat_id: '', neostation_id: '' })
       setData(d); setForm({}); onSaved && onSaved()
     } finally { setSaving(false) }
   }

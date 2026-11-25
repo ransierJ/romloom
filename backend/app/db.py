@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS systems (
     es_id         TEXT,
     batocera_id   TEXT,
     retrobat_id   TEXT,
+    neostation_id TEXT,
     rom_count     INTEGER NOT NULL DEFAULT 0,
     complete_count INTEGER NOT NULL DEFAULT 0,
     scan_sig      TEXT               -- content signature for incremental rescans
@@ -110,7 +111,8 @@ CREATE TABLE IF NOT EXISTS system_overrides (
     display_name TEXT,
     es_id        TEXT,
     batocera_id  TEXT,
-    retrobat_id  TEXT
+    retrobat_id  TEXT,
+    neostation_id TEXT
 );
 
 -- Reusable export presets (target + media selection + copy/link mode).
@@ -193,6 +195,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
     cols = {r[1] for r in conn.execute("PRAGMA table_info(systems)")}
     if cols and "scan_sig" not in cols:
         conn.execute("ALTER TABLE systems ADD COLUMN scan_sig TEXT")
+    if cols and "neostation_id" not in cols:
+        conn.execute("ALTER TABLE systems ADD COLUMN neostation_id TEXT")
+    socols = {r[1] for r in conn.execute("PRAGMA table_info(system_overrides)")}
+    if socols and "neostation_id" not in socols:
+        conn.execute("ALTER TABLE system_overrides ADD COLUMN neostation_id TEXT")
     gcols = {r[1] for r in conn.execute("PRAGMA table_info(games)")}
     if gcols and "video_file" not in gcols:
         conn.execute("ALTER TABLE games ADD COLUMN video_file TEXT")

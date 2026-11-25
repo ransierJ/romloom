@@ -26,12 +26,31 @@ class Platform:
     batocera: Optional[str] = None   # Batocera system id
     retrobat: Optional[str] = None   # Retrobat system id
     known: bool = True               # False for synthesized passthrough entries
+    neostation: Optional[str] = None # NeoStation platform id (folder name)
+
+
+# ROMLoom canonical id -> NeoStation short platform id, only where they differ.
+# Unlisted ids fall through to the canonical id (which NeoStation often shares:
+# snes, nes, gba, n64, dos, cps1/2/3, fbneo, neogeo, scummvm…).
+NEOSTATION_IDS = {
+    "atari2600": "2600", "atari5200": "5200", "atari7800": "7800",
+    "atarijaguar": "jag", "atarijaguarcd": "jagcd", "atarilynx": "lynx",
+    "nds": "ds", "virtualboy": "vb", "sega32x": "32x", "dreamcast": "dc",
+    "gamegear": "gg", "mastersystem": "sms", "saturn": "sat", "psx": "ps1",
+    "segacd": "mcd", "arcade": "mame", "neogeocd": "ngcd", "tg16cd": "tgcd",
+    "colecovision": "cv", "intellivision": "intv", "gameandwatch": "gw",
+    "odyssey2": "o2", "x68000": "sharpx68000", "sg1000": "sg1k",
+    "channelf": "chf", "supergrafx": "pce", "pcengine": "pce",
+}
 
 
 def _p(canonical, display, es=None, batocera=None, retrobat=None, *, folders):
     """Shorthand: a Platform plus its folder aliases. retrobat defaults to
-    batocera (Retrobat largely mirrors Batocera's system names)."""
-    return (Platform(canonical, display, es, batocera, retrobat or batocera), folders)
+    batocera (Retrobat largely mirrors Batocera's system names). The NeoStation
+    id defaults to the map above, else the canonical id."""
+    neo = NEOSTATION_IDS.get(canonical, canonical)
+    return (Platform(canonical, display, es, batocera, retrobat or batocera,
+                     neostation=neo), folders)
 
 
 # (Platform, [folder aliases]). The canonical id and display name are added as
@@ -249,4 +268,6 @@ def resolve(folder_name: str) -> Platform:
     hit = _BY_FOLDER.get(folder_name) or _BY_NORM.get(_norm(folder_name))
     if hit:
         return hit
-    return Platform(canonical=_slug(folder_name), display=folder_name, known=False)
+    slug = _slug(folder_name)
+    return Platform(canonical=slug, display=folder_name, known=False,
+                    neostation=NEOSTATION_IDS.get(slug, slug))

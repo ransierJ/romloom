@@ -263,6 +263,7 @@ class SystemOverride(BaseModel):
     es_id: Optional[str] = None
     batocera_id: Optional[str] = None
     retrobat_id: Optional[str] = None
+    neostation_id: Optional[str] = None
 
 
 @app.get("/api/systems/{sid}/mapping")
@@ -272,12 +273,13 @@ def system_mapping(sid: str):
         raise HTTPException(404, "Unknown system")
     d = platforms.resolve(row["folder"])
     ov = _conn.execute("SELECT * FROM system_overrides WHERE system_id = ?", (sid,)).fetchone()
-    keys = ("display_name", "es_id", "batocera_id", "retrobat_id")
+    keys = ("display_name", "es_id", "batocera_id", "retrobat_id", "neostation_id")
     return {
         "system_id": sid, "folder": row["folder"],
         "current": {k: row[k] for k in keys},
         "default": {"display_name": d.display, "es_id": d.es,
-                    "batocera_id": d.batocera, "retrobat_id": d.retrobat, "known": d.known},
+                    "batocera_id": d.batocera, "retrobat_id": d.retrobat,
+                    "neostation_id": d.neostation, "known": d.known},
         "override": {k: (ov[k] if ov else None) for k in keys},
     }
 
@@ -294,15 +296,18 @@ def patch_system_mapping(sid: str, body: SystemOverride):
         return v or None
 
     ov = {k: norm(getattr(body, k)) for k in
-          ("display_name", "es_id", "batocera_id", "retrobat_id")}
+          ("display_name", "es_id", "batocera_id", "retrobat_id", "neostation_id")}
 
     if any(ov.values()):
         _conn.execute(
-            "INSERT INTO system_overrides(system_id, display_name, es_id, batocera_id, retrobat_id) "
-            "VALUES (?,?,?,?,?) ON CONFLICT(system_id) DO UPDATE SET "
+            "INSERT INTO system_overrides"
+            "(system_id, display_name, es_id, batocera_id, retrobat_id, neostation_id) "
+            "VALUES (?,?,?,?,?,?) ON CONFLICT(system_id) DO UPDATE SET "
             "display_name=excluded.display_name, es_id=excluded.es_id, "
-            "batocera_id=excluded.batocera_id, retrobat_id=excluded.retrobat_id",
-            (sid, ov["display_name"], ov["es_id"], ov["batocera_id"], ov["retrobat_id"]),
+            "batocera_id=excluded.batocera_id, retrobat_id=excluded.retrobat_id, "
+            "neostation_id=excluded.neostation_id",
+            (sid, ov["display_name"], ov["es_id"], ov["batocera_id"],
+             ov["retrobat_id"], ov["neostation_id"]),
         )
     else:
         _conn.execute("DELETE FROM system_overrides WHERE system_id = ?", (sid,))
@@ -313,10 +318,13 @@ def patch_system_mapping(sid: str, body: SystemOverride):
         "es_id": ov["es_id"] or d.es or sid,
         "batocera_id": ov["batocera_id"] or d.batocera or sid,
         "retrobat_id": ov["retrobat_id"] or d.retrobat or sid,
+        "neostation_id": ov["neostation_id"] or d.neostation or sid,
     }
     _conn.execute(
-        "UPDATE systems SET display_name=?, es_id=?, batocera_id=?, retrobat_id=? WHERE id=?",
-        (eff["display_name"], eff["es_id"], eff["batocera_id"], eff["retrobat_id"], sid),
+        "UPDATE systems SET display_name=?, es_id=?, batocera_id=?, retrobat_id=?, "
+        "neostation_id=? WHERE id=?",
+        (eff["display_name"], eff["es_id"], eff["batocera_id"], eff["retrobat_id"],
+         eff["neostation_id"], sid),
     )
     _conn.commit()
     return system_mapping(sid)
