@@ -221,6 +221,22 @@ export default function App() {
     } catch { /* leave as is; next load corrects */ }
   }
 
+  const [verifying, setVerifying] = React.useState(false)
+  const verifySystem = async () => {
+    if (!active) return
+    setVerifying(true)
+    try {
+      const r = await api.verifySystem(active)
+      flash(`Verified ${r.verified} of ${r.total} against No-Intro — ${r.unverified} unmatched`
+            + (r.unhashed ? `, ${r.unhashed} not hashed` : ''))
+      forceReload()
+    } catch {
+      flash('Verification failed')
+    } finally {
+      setVerifying(false)
+    }
+  }
+
   const bulkAddFiltered = async () => {
     const label = collections.find((c) => c.id === curateInto)?.name || 'collection'
     const n = total
@@ -505,6 +521,11 @@ export default function App() {
           <button className={`btn sm ghost fav-filter${onlyFav ? ' on' : ''}`}
                   onClick={() => setOnlyFav((v) => !v)}
                   title={onlyFav ? 'Showing favorites only' : 'Show favorites only'}>♥</button>
+          {activeSys && activeSys.cartridge && (
+            <button className="btn sm ghost" onClick={verifySystem} disabled={verifying}
+                    title="Hash-check this system's ROMs against the No-Intro database">
+              {verifying ? 'Verifying…' : 'Verify'}</button>
+          )}
           <select className="ctl" value={sort} onChange={(e) => setSort(e.target.value)}>
             <option value="name">A–Z</option>
             <option value="name_desc">Z–A</option>

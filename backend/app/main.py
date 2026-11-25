@@ -252,7 +252,8 @@ def list_systems():
     out = []
     for r in rows:
         d = dict(r)
-        d["arcade"] = mame.is_arcade(r["id"])   # frontend shows arcade-only filters
+        d["arcade"] = mame.is_arcade(r["id"])      # arcade-only filters
+        d["cartridge"] = catalog.is_cartridge(r["id"])  # hash-verify available
         out.append(d)
     return out
 
@@ -415,6 +416,11 @@ def _game_dict(r) -> dict:
         "region": r["region"],
         "mame_cat": r["mame_cat"] if "mame_cat" in k else None,
         "is_mature": bool(r["is_mature"]) if "is_mature" in k else False,
+        "crc32": r["crc32"] if "crc32" in k else None,
+        "sha1": r["sha1"] if "sha1" in k else None,
+        "dat_match": r["dat_match"] if "dat_match" in k else None,
+        "verified": (None if ("verified" not in k or r["verified"] is None)
+                     else bool(r["verified"])),
         "coverage": r["coverage"],
         "has": {
             "cover": bool(r["cover_file"]),
@@ -641,6 +647,40 @@ def system_categories(system_id: str):
         "SELECT DISTINCT mame_cat FROM games WHERE system_id=? AND mame_cat IS NOT NULL "
         "AND mame_cat != '' ORDER BY mame_cat COLLATE NOCASE", (system_id,)).fetchall()
     return [r["mame_cat"] for r in rows]
+
+
+@app.post("/api/systems/{system_id}/verify")
+def verify_system(system_id: str):
+    """Hash-verify a cartridge system against its No-Intro DAT. Fetches the DAT
+    if not cached, builds a hash index, and updates each game's verified/dat_match
+    from the hashes computed at scan time. Returns the tally."""
+    if not _conn.execute("SELECT 1 FROM systems WHERE id=?", (system_id,)).fetchone():
+        raise HTTPException(404, "Unknown system")
+    if not catalog.is_cartridge(system_id):
+        raise HTTPException(400, "hash verification is only available for No-Intro (cartridge) systems")
+    if not catalog.cache_path(system_id).is_file():
+        try:
+            catalog.fetch(system_id)
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(502, f"could not fetch catalog: {e}")
+    text = catalog.cache_path(system_id).read_bytes().decode("utf-8", "ignore")
+    crc_idx, sha_idx = catalog.parse_hashes(text)
+
+    verified = unverified = unhashed = 0
+    for r in _conn.execute("SELECT id, crc32, sha1 FROM games WHERE system_id=?", (system_id,)):
+        if not r["crc32"]:
+            unhashed += 1
+            continue
+        name = crc_idx.get(r["crc32"]) or (sha_idx.get(r["sha1"]) if r["sha1"] else None)
+        if name:
+            _conn.execute("UPDATE games SET verified=1, dat_match=? WHERE id=?", (name, r["id"]))
+            verified += 1
+        else:
+            _conn.execute("UPDATE games SET verified=0, dat_match=NULL WHERE id=?", (r["id"],))
+            unverified += 1
+    _conn.commit()
+    return {"verified": verified, "unverified": unverified,
+            "unhashed": unhashed, "total": verified + unverified + unhashed}
 
 
 @app.get("/api/mame/status")

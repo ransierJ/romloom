@@ -197,6 +197,9 @@ export default function GameDrawer({ gameId, onClose, onDeleted, onUpdated, onRe
                     {g.players && (<><dt>Players</dt><dd>{g.players}</dd></>)}
                     {g.rating != null && (<><dt>Rating</dt><dd>{Math.round(g.rating * 100)}%</dd></>)}
                     <dt>File</dt><dd>{g.ext?.toUpperCase()} · {formatSize(g.size_bytes)}</dd>
+                    {g.verified === true && (<><dt>Verified</dt><dd style={{ color: 'var(--ok)' }}>✓ No-Intro{g.dat_match ? ` · ${g.dat_match}` : ''}</dd></>)}
+                    {g.verified === false && (<><dt>Verified</dt><dd className="muted">✕ no No-Intro match</dd></>)}
+                    {g.crc32 && (<><dt>CRC32</dt><dd style={{ fontFamily: 'monospace' }}>{g.crc32.toUpperCase()}</dd></>)}
                   </dl>
                 </>
               )}

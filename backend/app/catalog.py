@@ -135,6 +135,12 @@ def source_label(system_id: str) -> str | None:
     return src[0] if src else None
 
 
+def is_cartridge(system_id: str) -> bool:
+    """True for single-file (No-Intro) systems, where a whole-file hash is the
+    ROM's identity. Redump (disc) systems hash per-track — deferred to M4."""
+    return source_label(system_id) == "no-intro"
+
+
 def _url(system_id: str) -> str:
     group, fname = DAT_SOURCES[system_id]
     return _RAW.format(group=group, file=quote(fname + ".dat"))
@@ -180,6 +186,31 @@ def _tags(title: str) -> list[str]:
 def dat_version(text: str) -> str:
     m = re.search(r'version\s+"([^"]+)"', text)
     return m.group(1) if m else ""
+
+
+_CRC_RE = re.compile(r"\bcrc\s+([0-9A-Fa-f]{8})\b")
+_SHA1_RE = re.compile(r"\bsha1\s+([0-9A-Fa-f]{40})\b")
+
+
+def parse_hashes(text: str):
+    """Build (crc_index, sha1_index): lowercase-hex ROM hash -> catalog game
+    name, for hash-based verification. Each game's first rom entry wins (cart
+    sets are single-file). Keys let a scanned file's hash resolve to a known
+    No-Intro title."""
+    crc_idx: dict[str, str] = {}
+    sha1_idx: dict[str, str] = {}
+    matches = list(_GAME_RE.finditer(text))
+    for i, m in enumerate(matches):
+        name = m.group(1)
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        block = text[m.end():end]
+        cm = _CRC_RE.search(block)
+        if cm:
+            crc_idx.setdefault(cm.group(1).lower(), name)
+        sm = _SHA1_RE.search(block)
+        if sm:
+            sha1_idx.setdefault(sm.group(1).lower(), name)
+    return crc_idx, sha1_idx
 
 
 def parse_titles(text: str, retail_only: bool = True):

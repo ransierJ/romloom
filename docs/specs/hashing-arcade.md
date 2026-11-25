@@ -82,11 +82,20 @@ Incremental scan unaffected (skipped systems keep rows; rescanned pull from cach
 - MissingView: enabled for arcade once `arcade_catalog` is populated.
 
 ## Milestones
-- **M1 — Arcade filters**: `mame.py` + catver/DAT ingest + `is_mature`/`mame_cat`
-  columns + three filters + settings defaults. (name-join, no hashing)
-- **M2 — Hashing + verification**: `hashing.py` + `hash_cache` + cart match + badge.
+- **M1 — Arcade filters** ✅ done (`d504d10`): `mame.py` + catver/languages ingest
+  + `is_mature`/`mame_cat`/`mame_lang` + three filters + settings defaults.
+- **M2 — Hashing + verification** ✅ done: `hashing.py` + `hash_cache` + cartridge
+  CRC32/SHA1 at scan + No-Intro match + drawer badge + per-system Verify.
+  - Scan hashes cartridge ROMs (cached) and matches **if the DAT is already
+    cached**; it never force-fetches DATs mid-scan.
+  - `POST /api/systems/{id}/verify` fetches the DAT on demand, builds the hash
+    index, and fills verified/dat_match from the stored hashes.
+  - Known limit: headered systems (NES/SNES) and byte-swapped N64 hash
+    differently than No-Intro → they read `verified=0` (never wrongly matched).
+    Header/byteswap normalization is M4.
 - **M3 — Arcade Missing view**: MAME DAT diff, filtered.
-- **M4 — optional**: disc/Redump multi-track hashing; headered-system stripping.
+- **M4 — optional**: disc/Redump multi-track hashing; headered/byteswap
+  normalization so NES/SNES/N64 verify correctly.
 
 ## Locked decisions
 1. MAME data: auto-fetch from pinned mirror AND honor user-dropped files in

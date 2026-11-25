@@ -40,6 +40,7 @@ export const api = {
   categories: (systemId) => get(`/api/systems/${encodeURIComponent(systemId)}/categories`),
   mameStatus: () => get('/api/mame/status'),
   mameRefresh: () => send('/api/mame/refresh', 'POST', {}),
+  verifySystem: (systemId) => send(`/api/systems/${encodeURIComponent(systemId)}/verify`, 'POST', {}),
 
   game: (id) => get(`/api/games/${id}`),
 

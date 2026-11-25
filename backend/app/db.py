@@ -57,6 +57,12 @@ CREATE TABLE IF NOT EXISTS games (
     mame_cat        TEXT,              -- top-level catver category, e.g. "Shooter"
     mame_lang       TEXT,              -- languages.ini language (US-availability proxy)
 
+    -- cartridge identity (M2): whole-file hashes + No-Intro match result
+    crc32           TEXT,
+    sha1            TEXT,
+    dat_match       TEXT,              -- canonical No-Intro name if a hash matched
+    verified        INTEGER,           -- 1 matched, 0 no match, NULL not checked
+
     -- derived: "complete" | "partial" | "missing"
     coverage      TEXT NOT NULL DEFAULT 'missing'
 );
@@ -156,6 +162,16 @@ CREATE TABLE IF NOT EXISTS game_user_data (
 );
 CREATE INDEX IF NOT EXISTS idx_gud_fav ON game_user_data(favorite);
 
+-- Hash cache (M2): computed CRC32/SHA1 per source file, keyed by identity
+-- (path+size+mtime) so an unchanged ROM is never re-hashed across scans.
+CREATE TABLE IF NOT EXISTS hash_cache (
+    path  TEXT PRIMARY KEY,
+    size  INTEGER NOT NULL,
+    mtime INTEGER NOT NULL,
+    crc32 TEXT,
+    sha1  TEXT
+);
+
 -- One row per system whose catalog has been fetched: when and which DAT version.
 CREATE TABLE IF NOT EXISTS catalog_meta (
     system_id     TEXT PRIMARY KEY,
@@ -183,6 +199,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE games ADD COLUMN mame_cat TEXT")
     if gcols and "mame_lang" not in gcols:
         conn.execute("ALTER TABLE games ADD COLUMN mame_lang TEXT")
+    for col, decl in (("crc32", "TEXT"), ("sha1", "TEXT"),
+                      ("dat_match", "TEXT"), ("verified", "INTEGER")):
+        if gcols and col not in gcols:
+            conn.execute(f"ALTER TABLE games ADD COLUMN {col} {decl}")
     ccols = {r[1] for r in conn.execute("PRAGMA table_info(collections)")}
     if ccols and "rules" not in ccols:
         conn.execute("ALTER TABLE collections ADD COLUMN rules TEXT")

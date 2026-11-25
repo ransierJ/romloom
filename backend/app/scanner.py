@@ -21,7 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, Iterable, Optional, Tuple
 
-from . import config, db, mame, platforms, thumbnails
+from . import catalog, config, db, hashing, mame, platforms, thumbnails
 
 # Metadata fields we lift out of each media/textual/<stem>.xml.
 _TEXTUAL_FIELDS = (
@@ -444,6 +444,20 @@ def _scan_system(conn, sys_dir: os.DirEntry, signature: str = "") -> tuple[int, 
             for r in conn.execute(
                 "SELECT set_name, top_cat, is_mature, language FROM arcade_catalog")
         }
+
+    # Cartridge (No-Intro): hash each ROM and, when the system's DAT is already
+    # cached, resolve the hash to a canonical title. We never force-fetch the DAT
+    # here — hashes are stored regardless and the /verify endpoint fills in the
+    # match on demand for systems whose catalog hasn't been downloaded yet.
+    is_cart = catalog.is_cartridge(plat.canonical)
+    crc_idx: Dict[str, str] = {}
+    sha_idx: Dict[str, str] = {}
+    if is_cart and catalog.cache_path(plat.canonical).is_file():
+        try:
+            dat = catalog.cache_path(plat.canonical).read_bytes().decode("utf-8", "ignore")
+            crc_idx, sha_idx = catalog.parse_hashes(dat)
+        except OSError:
+            pass
     for rom in _enumerate_roms(sys_path, allowed_exts):
         cover = _pick(media["cover"], rom)
         shot = _pick(media["screenshot"], rom)
@@ -497,13 +511,27 @@ def _scan_system(conn, sys_dir: os.DirEntry, signature: str = "") -> tuple[int, 
         is_mature = int(am[1]) if am else 0
         mame_lang = am[2] if am else None
 
+        # Cartridge hashing + verification (single-file ROMs only).
+        crc32 = sha1 = dat_match = verified = None
+        if is_cart and not rom.alt_stem:
+            fp = sys_path / rom.filename
+            try:
+                mtime = fp.stat().st_mtime
+            except OSError:
+                mtime = 0
+            crc32, sha1 = hashing.file_hashes(conn, fp, rom.size, mtime)
+            if crc32 is not None and (crc_idx or sha_idx):
+                dat_match = crc_idx.get(crc32) or (sha_idx.get(sha1) if sha1 else None)
+                verified = 1 if dat_match else 0
+
         rows.append((
             plat.canonical, rom.filename, rom.stem, rom.ext, rom.size,
             meta.get("name") or rom.stem, meta.get("description"), rating,
             meta.get("releasedate"), meta.get("developer"), meta.get("publisher"),
             meta.get("genre"), meta.get("players"),
             cover, shot, wheel, marquee, video_name, _parse_region(rom.filename),
-            int(has_textual), is_mature, mame_cat, mame_lang, cov,
+            int(has_textual), is_mature, mame_cat, mame_lang,
+            crc32, sha1, dat_match, verified, cov,
         ))
 
     conn.executemany(
@@ -511,8 +539,8 @@ def _scan_system(conn, sys_dir: os.DirEntry, signature: str = "") -> tuple[int, 
         "(system_id, rom_filename, stem, ext, size_bytes,"
         " name, description, rating, releasedate, developer, publisher, genre, players,"
         " cover_file, screenshot_file, wheel_file, marquee_file, video_file, region, has_textual,"
-        " is_mature, mame_cat, mame_lang, coverage) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        " is_mature, mame_cat, mame_lang, crc32, sha1, dat_match, verified, coverage) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         rows,
     )
     conn.execute(
