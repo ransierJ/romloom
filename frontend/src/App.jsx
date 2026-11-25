@@ -38,6 +38,11 @@ export default function App() {
   const [genre, setGenre] = React.useState('')
   const [onlyFav, setOnlyFav] = React.useState(false)
   const [genreList, setGenreList] = React.useState([])
+  const [hideMature, setHideMature] = React.useState(false)   // arcade only
+  const [usaOnly, setUsaOnly] = React.useState(false)          // arcade only
+  const [category, setCategory] = React.useState('')           // arcade only
+  const [catList, setCatList] = React.useState([])
+  const arcadeDefaults = React.useRef({ hide_mature: false, usa_only: false })
   const [sort, setSort] = React.useState('name')
 
   const [collections, setCollections] = React.useState([])
@@ -93,30 +98,46 @@ export default function App() {
   }, [])
 
   React.useEffect(() => { loadSystems(); loadCollections() }, [loadSystems, loadCollections])
+  // Arcade filter defaults (applied when an arcade system is opened).
+  React.useEffect(() => {
+    api.getSettings().then((s) => {
+      if (s && s.arcade) arcadeDefaults.current = {
+        hide_mature: !!s.arcade.hide_mature, usa_only: !!s.arcade.usa_only }
+    }).catch(() => {})
+  }, [])
   React.useEffect(() => {
     const poll = () => api.scanStatus().then(setScan).catch(() => {})
     poll(); const t = setInterval(poll, 4000); return () => clearInterval(t)
   }, [])
 
   // Reset paging on any query change.
-  React.useEffect(() => { setOffset(0) }, [mode, active, activeCollection, dSearch, coverage, region, genre, onlyFav, sort, curateInto, collSystem])
+  React.useEffect(() => { setOffset(0) }, [mode, active, activeCollection, dSearch, coverage, region, genre, onlyFav, hideMature, usaOnly, category, sort, curateInto, collSystem])
 
   // A system filter only applies within one collection — clear it on switch.
   React.useEffect(() => { setCollSystem(null) }, [activeCollection, mode])
 
   // Changing system clears region/genre filters that may not apply, and loads
-  // the new system's genre facet for the dropdown.
+  // the new system's genre facet for the dropdown. Arcade systems additionally
+  // load their category facet and apply the saved arcade filter defaults.
   React.useEffect(() => {
-    setRegion(''); setGenre('')
+    setRegion(''); setGenre(''); setCategory('')
     if (active) api.genres(active).then(setGenreList).catch(() => setGenreList([]))
     else setGenreList([])
-  }, [active])
+    const sys = systems.find((s) => s.id === active)
+    if (sys && sys.arcade) {
+      api.categories(active).then(setCatList).catch(() => setCatList([]))
+      setHideMature(arcadeDefaults.current.hide_mature)
+      setUsaOnly(arcadeDefaults.current.usa_only)
+    } else {
+      setCatList([]); setHideMature(false); setUsaOnly(false)
+    }
+  }, [active, systems])
 
   // Fetch a page for whichever mode is active.
   React.useEffect(() => {
     if (mode === 'missing') return   // Missing view fetches its own data
     let alive = true
-    const opts = { search: dSearch, coverage, region: region || null, genre: genre || null, favorite: onlyFav, sort, limit: PAGE, offset }
+    const opts = { search: dSearch, coverage, region: region || null, genre: genre || null, favorite: onlyFav, hideMature, usaOnly, category: category || '', sort, limit: PAGE, offset }
     let req
     if (mode === 'collections') {
       if (!activeCollection) { setGames([]); setTotal(0); return }
@@ -133,7 +154,7 @@ export default function App() {
     }).catch(() => { if (alive) { setGames([]); setTotal(0) } })
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
-  }, [mode, active, activeCollection, dSearch, coverage, region, genre, onlyFav, sort, offset, curateInto, collSystem, reloadKey])
+  }, [mode, active, activeCollection, dSearch, coverage, region, genre, onlyFav, hideMature, usaOnly, category, sort, offset, curateInto, collSystem, reloadKey])
 
   // Collection detail for the Collections page header.
   React.useEffect(() => {
@@ -203,7 +224,11 @@ export default function App() {
   const bulkAddFiltered = async () => {
     const label = collections.find((c) => c.id === curateInto)?.name || 'collection'
     const n = total
-    const d = await api.addByQuery(curateInto, { system_id: active, search: dSearch, coverage: coverage || null })
+    const d = await api.addByQuery(curateInto, {
+      system_id: active, search: dSearch, coverage: coverage || null,
+      region: region || null, genre: genre || null,
+      hide_mature: hideMature, category: category || null, usa_only: usaOnly,
+    })
     forceReload()          // re-fetch to light up the checkboxes
     loadCollections()
     flash(`Added ${n} to “${label}” — ${d.game_count} games total`)
@@ -460,6 +485,22 @@ export default function App() {
               <option value="">all genres</option>
               {genreList.map((gn) => <option key={gn} value={gn}>{gn}</option>)}
             </select>
+          )}
+          {activeSys && activeSys.arcade && (
+            <>
+              <button className={`btn sm ghost${hideMature ? ' on' : ''}`}
+                      onClick={() => setHideMature((v) => !v)}
+                      title="Hide adult / mature arcade games (catver.ini)">hide adult</button>
+              <button className={`btn sm ghost${usaOnly ? ' on' : ''}`}
+                      onClick={() => setUsaOnly((v) => !v)}
+                      title="Hide import-only (Japan / Asia-language) arcade games">US/World</button>
+              {catList.length > 0 && (
+                <select className="ctl" value={category} onChange={(e) => setCategory(e.target.value)} title="Filter by arcade category">
+                  <option value="">all categories</option>
+                  {catList.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              )}
+            </>
           )}
           <button className={`btn sm ghost fav-filter${onlyFav ? ' on' : ''}`}
                   onClick={() => setOnlyFav((v) => !v)}

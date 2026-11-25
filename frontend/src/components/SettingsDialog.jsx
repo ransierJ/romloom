@@ -12,6 +12,10 @@ export default function SettingsDialog({ onClose, onSaved }) {
   const [igdbSecret, setIgdbSecret] = React.useState('')
   const [igdbSecretSet, setIgdbSecretSet] = React.useState(false)
   const [installed, setInstalled] = React.useState(true)
+  const [arcHideMature, setArcHideMature] = React.useState(false)
+  const [arcUsaOnly, setArcUsaOnly] = React.useState(false)
+  const [mame, setMame] = React.useState(null)
+  const [mameBusy, setMameBusy] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
   const [msg, setMsg] = React.useState(null)
 
@@ -22,9 +26,18 @@ export default function SettingsDialog({ onClose, onSaved }) {
       setRegion(s.scrape?.region || 'us')
       setIgdbId(s.igdb?.client_id || '')
       setIgdbSecretSet(!!s.igdb?.client_secret_set)
+      setArcHideMature(!!s.arcade?.hide_mature)
+      setArcUsaOnly(!!s.arcade?.usa_only)
     }).catch(() => {})
     api.scrapeAvailable().then((a) => setInstalled(a.installed)).catch(() => {})
+    api.mameStatus().then(setMame).catch(() => {})
   }, [])
+
+  const refreshMame = async () => {
+    setMameBusy(true)
+    try { setMame(await api.mameRefresh()) } catch { /* leave prior status */ }
+    finally { setMameBusy(false) }
+  }
 
   React.useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose() }
@@ -34,7 +47,8 @@ export default function SettingsDialog({ onClose, onSaved }) {
 
   const save = async () => {
     setSaving(true); setMsg(null)
-    const body = { screenscraper: { user }, scrape: { region }, igdb: { client_id: igdbId } }
+    const body = { screenscraper: { user }, scrape: { region }, igdb: { client_id: igdbId },
+                   arcade: { hide_mature: arcHideMature, usa_only: arcUsaOnly } }
     if (password) body.screenscraper.password = password   // omit = keep existing
     if (igdbSecret) body.igdb.client_secret = igdbSecret
     try {
@@ -103,6 +117,32 @@ export default function SettingsDialog({ onClose, onSaved }) {
             <span>Client Secret {igdbSecretSet && <em style={{ color: 'var(--ink-faint)', fontStyle: 'normal' }}>· saved (leave blank to keep)</em>}</span>
             <input type="password" value={igdbSecret} onChange={(e) => setIgdbSecret(e.target.value)}
                    placeholder={igdbSecretSet ? '••••••••' : ''} autoComplete="new-password" />
+          </label>
+
+          <h3 style={{ marginTop: 22 }}>Arcade filtering (MAME)</h3>
+          <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
+            Uses the progettosnaps <code>catver.ini</code> + <code>languages.ini</code> to
+            tag arcade sets with a category, an adult/mature flag, and a text language
+            (a rough US-availability signal). Downloaded to <code>/config/mame</code>; you
+            can also drop your own files there and they won’t be overwritten.
+          </p>
+          <p className="muted" style={{ fontSize: 13, marginTop: 6 }}>
+            {mame
+              ? (mame.available
+                  ? `${(mame.sets || 0).toLocaleString()} sets · ${mame.mature || 0} flagged adult`
+                  : 'Not downloaded yet.')
+              : '…'}
+            <button className="btn sm ghost" style={{ marginLeft: 10 }} onClick={refreshMame} disabled={mameBusy}>
+              {mameBusy ? 'Refreshing…' : 'Refresh data'}
+            </button>
+          </p>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10 }}>
+            <input type="checkbox" checked={arcHideMature} onChange={(e) => setArcHideMature(e.target.checked)} />
+            <span>Hide adult games by default on arcade systems</span>
+          </label>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
+            <input type="checkbox" checked={arcUsaOnly} onChange={(e) => setArcUsaOnly(e.target.checked)} />
+            <span>US/World only by default (hide Japan/Asia-language sets)</span>
           </label>
 
           <div className="eactions" style={{ marginTop: 16 }}>

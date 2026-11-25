@@ -23,8 +23,8 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel
 
-from . import (catalog, config, db, export, gametdb, igdb, libretro, platforms,
-               scanner, scraper, settings, thumbnails)
+from . import (catalog, config, db, export, gametdb, igdb, libretro, mame,
+               platforms, scanner, scraper, settings, thumbnails)
 from .scanner import scan
 
 app = FastAPI(title="ROMLoom", version="1.0.0")
@@ -249,7 +249,12 @@ def list_systems():
         " es_id, batocera_id, retrobat_id FROM systems "
         "WHERE rom_count > 0 ORDER BY display_name"
     ).fetchall()
-    return [dict(r) for r in rows]
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["arcade"] = mame.is_arcade(r["id"])   # frontend shows arcade-only filters
+        out.append(d)
+    return out
 
 
 class SystemOverride(BaseModel):
@@ -408,6 +413,8 @@ def _game_dict(r) -> dict:
         "genre": r["genre"],
         "players": r["players"],
         "region": r["region"],
+        "mame_cat": r["mame_cat"] if "mame_cat" in k else None,
+        "is_mature": bool(r["is_mature"]) if "is_mature" in k else False,
         "coverage": r["coverage"],
         "has": {
             "cover": bool(r["cover_file"]),
@@ -429,7 +436,9 @@ def _game_dict(r) -> dict:
 
 def _games_where(system_id: str, search: str, coverage: Optional[str],
                  region: Optional[str] = None, genre: Optional[str] = None,
-                 favorite: bool = False, status: Optional[str] = None):
+                 favorite: bool = False, status: Optional[str] = None,
+                 hide_mature: bool = False, category: Optional[str] = None,
+                 usa_only: bool = False):
     """Shared WHERE builder for library listing and bulk add-by-query. The
     favorite/status predicates reference the game_user_data alias `u`, so callers
     using these must include _USER_JOIN in their query."""
@@ -453,6 +462,18 @@ def _games_where(system_id: str, search: str, coverage: Optional[str],
     if status:
         where.append("u.status = ?")
         params.append(status)
+    # Arcade (MAME) filters.
+    if hide_mature:
+        where.append("COALESCE(g.is_mature,0) = 0")
+    if category:
+        where.append("g.mame_cat = ?")
+        params.append(category)
+    if usa_only:
+        # Hide sets whose text language marks them import-only (Japan/Asia); keep
+        # English and language-neutral (NULL) sets. Approximate by design.
+        ph = ",".join("?" for _ in mame.NON_US_LANGS)
+        where.append(f"(g.mame_lang IS NULL OR g.mame_lang NOT IN ({ph}))")
+        params += sorted(mame.NON_US_LANGS)
     return " AND ".join(where), params
 
 
@@ -562,6 +583,9 @@ def list_games(
     genre: Optional[str] = Query(None),
     favorite: bool = Query(False),
     status: Optional[str] = Query(None),
+    hide_mature: bool = Query(False),
+    category: Optional[str] = Query(None),
+    usa_only: bool = Query(False),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     selected_for: Optional[int] = Query(None, description="collection id to flag membership"),
@@ -569,7 +593,8 @@ def list_games(
     if not _conn.execute("SELECT 1 FROM systems WHERE id = ?", (system_id,)).fetchone():
         raise HTTPException(404, "Unknown system")
 
-    where_sql, params = _games_where(system_id, search, coverage, region, genre, favorite, status)
+    where_sql, params = _games_where(system_id, search, coverage, region, genre, favorite,
+                                     status, hide_mature, category, usa_only)
     order = _SORTS.get(sort, _SORTS["name"])
 
     total = _conn.execute(
@@ -606,6 +631,33 @@ def system_genres(system_id: str):
         "SELECT DISTINCT genre FROM games WHERE system_id=? AND genre IS NOT NULL "
         "AND genre != '' ORDER BY genre COLLATE NOCASE", (system_id,)).fetchall()
     return [r["genre"] for r in rows]
+
+
+@app.get("/api/systems/{system_id}/categories")
+def system_categories(system_id: str):
+    """Distinct MAME (catver) top-level categories present in an arcade system,
+    for the arcade category filter dropdown."""
+    rows = _conn.execute(
+        "SELECT DISTINCT mame_cat FROM games WHERE system_id=? AND mame_cat IS NOT NULL "
+        "AND mame_cat != '' ORDER BY mame_cat COLLATE NOCASE", (system_id,)).fetchall()
+    return [r["mame_cat"] for r in rows]
+
+
+@app.get("/api/mame/status")
+def mame_status():
+    """Arcade support-file status for the Settings panel."""
+    return mame.status()
+
+
+@app.post("/api/mame/refresh")
+def mame_refresh():
+    """Re-download the MAME support files and rebuild arcade_catalog. The next
+    (or an in-progress) scan re-applies category/mature/language to arcade games;
+    this does not itself re-tag already-indexed games."""
+    st = mame.fetch(force=True)
+    count = mame.ingest(_conn) if mame.available() else 0
+    _conn.commit()
+    return {"fetch": st, "sets": count, **mame.status()}
 
 
 @app.get("/api/games/{game_id}")
@@ -953,6 +1005,11 @@ class QueryAddBody(BaseModel):
     system_id: str
     search: Optional[str] = ""
     coverage: Optional[str] = None
+    region: Optional[str] = None
+    genre: Optional[str] = None
+    hide_mature: bool = False
+    category: Optional[str] = None
+    usa_only: bool = False
 
 
 def _collection_or_404(cid: int):
@@ -1216,7 +1273,10 @@ def add_by_query(cid: int, body: QueryAddBody):
     _collection_or_404(cid)
     if not _conn.execute("SELECT 1 FROM systems WHERE id = ?", (body.system_id,)).fetchone():
         raise HTTPException(404, "Unknown system")
-    where_sql, params = _games_where(body.system_id, body.search or "", body.coverage)
+    # Only g.* predicates here (no _USER_JOIN), so favorite/status are omitted.
+    where_sql, params = _games_where(
+        body.system_id, body.search or "", body.coverage, body.region, body.genre,
+        hide_mature=body.hide_mature, category=body.category, usa_only=body.usa_only)
     now = int(time.time())
     _conn.execute(
         "INSERT OR IGNORE INTO collection_games(collection_id, system_id, rom_filename, added_epoch) "

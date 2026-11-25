@@ -23,17 +23,23 @@ export const api = {
   scanStatus: () => get('/api/scan/status'),
   startScan: (force = false) => fetch(`/api/scan${force ? '?force=true' : ''}`, { method: 'POST' }),
 
-  games(systemId, { search = '', coverage = '', region = '', genre = '', favorite = false, sort = 'name', limit = 100, offset = 0, selectedFor = null } = {}) {
+  games(systemId, { search = '', coverage = '', region = '', genre = '', favorite = false, hideMature = false, category = '', usaOnly = false, sort = 'name', limit = 100, offset = 0, selectedFor = null } = {}) {
     const p = new URLSearchParams({ sort, limit, offset })
     if (search) p.set('search', search)
     if (coverage) p.set('coverage', coverage)
     if (region) p.set('region', region)
     if (genre) p.set('genre', genre)
     if (favorite) p.set('favorite', 'true')
+    if (hideMature) p.set('hide_mature', 'true')
+    if (category) p.set('category', category)
+    if (usaOnly) p.set('usa_only', 'true')
     if (selectedFor != null) p.set('selected_for', selectedFor)
     return get(`/api/systems/${encodeURIComponent(systemId)}/games?${p}`)
   },
   genres: (systemId) => get(`/api/systems/${encodeURIComponent(systemId)}/genres`),
+  categories: (systemId) => get(`/api/systems/${encodeURIComponent(systemId)}/categories`),
+  mameStatus: () => get('/api/mame/status'),
+  mameRefresh: () => send('/api/mame/refresh', 'POST', {}),
 
   game: (id) => get(`/api/games/${id}`),
 

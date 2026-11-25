@@ -14,6 +14,8 @@ DEFAULTS: Dict[str, Any] = {
     "igdb": {"client_id": "", "client_secret": ""},  # Phase 5.4
     "scrape": {"source": "screenscraper", "missing_only": True,
                "region": "us", "lang": "en"},
+    # Arcade view defaults (applied by the UI when an arcade system is opened).
+    "arcade": {"hide_mature": False, "usa_only": False},
 }
 
 # Which leaf keys are secrets — masked on read, only updated when a value is sent.

@@ -21,7 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, Iterable, Optional, Tuple
 
-from . import config, db, platforms, thumbnails
+from . import config, db, mame, platforms, thumbnails
 
 # Metadata fields we lift out of each media/textual/<stem>.xml.
 _TEXTUAL_FIELDS = (
@@ -434,6 +434,16 @@ def _scan_system(conn, sys_dir: os.DirEntry, signature: str = "") -> tuple[int, 
     rows = []
     warm_targets: Dict[str, set] = {}   # abs media path -> {widths} to pre-thumb
     allowed_exts = config.SYSTEM_ROM_EXTENSIONS.get(plat.canonical)
+
+    # Arcade: pull the MAME set -> (category, mature, language) map once, keyed by
+    # the zip stem. Empty for non-arcade systems or when no support files exist.
+    arcade_meta: Dict[str, tuple] = {}
+    if plat.canonical in mame.ARCADE_SYSTEMS:
+        arcade_meta = {
+            r["set_name"]: (r["top_cat"], r["is_mature"], r["language"])
+            for r in conn.execute(
+                "SELECT set_name, top_cat, is_mature, language FROM arcade_catalog")
+        }
     for rom in _enumerate_roms(sys_path, allowed_exts):
         cover = _pick(media["cover"], rom)
         shot = _pick(media["screenshot"], rom)
@@ -482,21 +492,27 @@ def _scan_system(conn, sys_dir: os.DirEntry, signature: str = "") -> tuple[int, 
             complete_count += 1
         rom_count += 1
 
+        am = arcade_meta.get(rom.stem.lower()) if arcade_meta else None
+        mame_cat = am[0] if am else None
+        is_mature = int(am[1]) if am else 0
+        mame_lang = am[2] if am else None
+
         rows.append((
             plat.canonical, rom.filename, rom.stem, rom.ext, rom.size,
             meta.get("name") or rom.stem, meta.get("description"), rating,
             meta.get("releasedate"), meta.get("developer"), meta.get("publisher"),
             meta.get("genre"), meta.get("players"),
             cover, shot, wheel, marquee, video_name, _parse_region(rom.filename),
-            int(has_textual), cov,
+            int(has_textual), is_mature, mame_cat, mame_lang, cov,
         ))
 
     conn.executemany(
         "INSERT INTO games"
         "(system_id, rom_filename, stem, ext, size_bytes,"
         " name, description, rating, releasedate, developer, publisher, genre, players,"
-        " cover_file, screenshot_file, wheel_file, marquee_file, video_file, region, has_textual, coverage) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        " cover_file, screenshot_file, wheel_file, marquee_file, video_file, region, has_textual,"
+        " is_mature, mame_cat, mame_lang, coverage) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         rows,
     )
     conn.execute(
@@ -608,6 +624,18 @@ def scan(conn, roms_root: Path | None = None, force: bool = False) -> ScanStats:
     # Drop systems that no longer exist on disk.
     present = {platforms.resolve(e.name).canonical for e in _iter_system_dirs(root)}
     existing = {r["id"] for r in conn.execute("SELECT id FROM systems")}
+
+    # Refresh the arcade (MAME) reference so per-set category/mature/language is
+    # available when arcade systems are (re)indexed below. Best-effort: a network
+    # failure or absent files just leaves arcade metadata empty.
+    if present & mame.ARCADE_SYSTEMS:
+        try:
+            mame.fetch()
+            if mame.available():
+                mame.ingest(conn)
+        except Exception:
+            pass
+
     for gone in existing - present:
         conn.execute("DELETE FROM systems WHERE id = ?", (gone,))
 

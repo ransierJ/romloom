@@ -52,6 +52,11 @@ CREATE TABLE IF NOT EXISTS games (
     region          TEXT,              -- comma-joined region tags (USA,Europe,…)
     has_textual     INTEGER NOT NULL DEFAULT 0,
 
+    -- arcade (MAME) metadata, joined from catver.ini / languages.ini by set name
+    is_mature       INTEGER NOT NULL DEFAULT 0,
+    mame_cat        TEXT,              -- top-level catver category, e.g. "Shooter"
+    mame_lang       TEXT,              -- languages.ini language (US-availability proxy)
+
     -- derived: "complete" | "partial" | "missing"
     coverage      TEXT NOT NULL DEFAULT 'missing'
 );
@@ -120,6 +125,21 @@ CREATE TABLE IF NOT EXISTS catalog_titles (
 );
 CREATE INDEX IF NOT EXISTS idx_catalog_system ON catalog_titles(system_id);
 
+-- Arcade (MAME) reference metadata, parsed from the progettosnaps support files
+-- (catver.ini + languages.ini). Keyed by MAME set short name — the same value as
+-- games.stem for arcade zips. Drives the arcade filters and (M3) the arcade
+-- Missing view. Repopulated on scan; independent of scraping.
+CREATE TABLE IF NOT EXISTS arcade_catalog (
+    set_name    TEXT PRIMARY KEY,      -- MAME short name, e.g. "sf2"
+    parent      TEXT,                  -- cloneof parent set, or NULL (M3)
+    is_clone    INTEGER NOT NULL DEFAULT 0,
+    category    TEXT,                  -- full catver category, e.g. "Shooter / Flying Vertical"
+    top_cat     TEXT,                  -- first segment, e.g. "Shooter"
+    is_mature   INTEGER NOT NULL DEFAULT 0,
+    language    TEXT,                  -- languages.ini language, or NULL (neutral)
+    description TEXT                   -- MAME full title w/ region (M3)
+);
+
 -- Per-game user data (favorite, rating, completion, tags, notes). Keyed by the
 -- stable natural key — NOT games.id — so it survives the scanner rebuilding the
 -- games table each scan, exactly like collection membership.
@@ -157,6 +177,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE games ADD COLUMN video_file TEXT")
     if gcols and "region" not in gcols:
         conn.execute("ALTER TABLE games ADD COLUMN region TEXT")
+    if gcols and "is_mature" not in gcols:
+        conn.execute("ALTER TABLE games ADD COLUMN is_mature INTEGER NOT NULL DEFAULT 0")
+    if gcols and "mame_cat" not in gcols:
+        conn.execute("ALTER TABLE games ADD COLUMN mame_cat TEXT")
+    if gcols and "mame_lang" not in gcols:
+        conn.execute("ALTER TABLE games ADD COLUMN mame_lang TEXT")
     ccols = {r[1] for r in conn.execute("PRAGMA table_info(collections)")}
     if ccols and "rules" not in ccols:
         conn.execute("ALTER TABLE collections ADD COLUMN rules TEXT")

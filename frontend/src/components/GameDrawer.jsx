@@ -192,6 +192,7 @@ export default function GameDrawer({ gameId, onClose, onDeleted, onUpdated, onRe
                     {g.developer && (<><dt>Developer</dt><dd>{g.developer}</dd></>)}
                     {g.publisher && (<><dt>Publisher</dt><dd>{g.publisher}</dd></>)}
                     {g.genre && (<><dt>Genre</dt><dd>{g.genre}</dd></>)}
+                    {g.mame_cat && (<><dt>Category</dt><dd>{g.mame_cat}{g.is_mature ? ' · adult' : ''}</dd></>)}
                     {g.releasedate && (<><dt>Released</dt><dd>{g.releasedate}</dd></>)}
                     {g.players && (<><dt>Players</dt><dd>{g.players}</dd></>)}
                     {g.rating != null && (<><dt>Rating</dt><dd>{Math.round(g.rating * 100)}%</dd></>)}
