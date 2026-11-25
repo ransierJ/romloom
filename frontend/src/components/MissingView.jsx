@@ -12,10 +12,12 @@ function fmtDate(epoch) {
 }
 
 // "What am I missing?" — diffs a system against its reference catalog.
-export default function MissingView({ systemId, systemName, flash }) {
+export default function MissingView({ systemId, systemName, arcade = false, flash }) {
   const [region, setRegion] = React.useState('USA')
   const [search, setSearch] = React.useState('')
   const [dSearch, setDSearch] = React.useState('')
+  // Arcade toggles (default: parent sets, US/World, non-adult, non-junk).
+  const [tog, setTog] = React.useState({ clones: false, mature: false, nonus: false, junk: false })
   const [data, setData] = React.useState(null)
   const [rows, setRows] = React.useState([])
   const [offset, setOffset] = React.useState(0)
@@ -27,13 +29,15 @@ export default function MissingView({ systemId, systemName, flash }) {
     return () => clearTimeout(t)
   }, [search])
 
-  React.useEffect(() => { setOffset(0) }, [systemId, region, dSearch])
+  React.useEffect(() => { setOffset(0) }, [systemId, region, dSearch, tog])
 
   React.useEffect(() => {
     if (!systemId) { setData(null); setRows([]); return }
     let alive = true
     setLoading(true)
-    api.missing(systemId, { region, search: dSearch, limit: PAGE, offset })
+    api.missing(systemId, { region, search: dSearch, limit: PAGE, offset,
+                            includeClones: tog.clones, includeMature: tog.mature,
+                            includeNonus: tog.nonus, includeJunk: tog.junk })
       .then((res) => {
         if (!alive) return
         setData(res)
@@ -42,7 +46,7 @@ export default function MissingView({ systemId, systemName, flash }) {
       .catch(() => { if (alive) { setData(null); setRows([]) } })
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
-  }, [systemId, region, dSearch, offset, fetching])
+  }, [systemId, region, dSearch, offset, fetching, tog])
 
   const refresh = async () => {
     if (!systemId) return
@@ -87,16 +91,27 @@ export default function MissingView({ systemId, systemName, flash }) {
         <h1>{systemName || systemId}</h1>
         {data?.imported && (
           <span className="count tnum">
-            {data.have} / {data.catalog_total} {region} · <b>{data.missing_total} missing</b>
+            {data.have} / {data.catalog_total} {arcade ? 'US/World' : region} · <b>{data.missing_total} missing</b>
           </span>
         )}
         <div className="search">
           <span className="ic">⌕</span>
           <input placeholder="search missing titles…" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
-        <select className="ctl" value={region} onChange={(e) => setRegion(e.target.value)} title="Region">
-          {REGIONS.map((r) => <option key={r} value={r}>{r}</option>)}
-        </select>
+        {arcade ? (
+          <div className="arc-toggles" style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 13 }}>
+            {[['clones', 'clones'], ['mature', 'adult'], ['nonus', 'import-only'], ['junk', 'mahjong/casino']].map(([k, label]) => (
+              <label key={k} style={{ display: 'flex', gap: 4, alignItems: 'center' }} title={`Include ${label}`}>
+                <input type="checkbox" checked={tog[k]} onChange={(e) => setTog((t) => ({ ...t, [k]: e.target.checked }))} />
+                {label}
+              </label>
+            ))}
+          </div>
+        ) : (
+          <select className="ctl" value={region} onChange={(e) => setRegion(e.target.value)} title="Region">
+            {REGIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+          </select>
+        )}
         <span style={{ flex: 1 }} />
         {data?.imported && (
           <span className="muted miss-src">
@@ -120,16 +135,21 @@ export default function MissingView({ systemId, systemName, flash }) {
           </div>
         ) : !data.imported ? (
           <div className="empty miss-note">
-            <p>The complete <b>{data.source === 'redump' ? 'Redump' : 'No-Intro'}</b> catalog for this system
-               hasn’t been downloaded yet.</p>
+            {arcade ? (
+              <p>The <b>MAME arcade database</b> (~34&nbsp;MB) hasn’t been downloaded yet.
+                 It lists every arcade game so ROMLoom can show what USA titles you’re missing.</p>
+            ) : (
+              <p>The complete <b>{data.source === 'redump' ? 'Redump' : 'No-Intro'}</b> catalog for this system
+                 hasn’t been downloaded yet.</p>
+            )}
             <button className="btn add-all" onClick={refresh} disabled={fetching}>
-              {fetching ? 'Fetching…' : `Fetch ${region} catalog`}
+              {fetching ? 'Fetching…' : (arcade ? 'Download MAME dat (~34 MB)' : `Fetch ${region} catalog`)}
             </button>
           </div>
         ) : rows.length === 0 ? (
           <div className="empty">
             {data.missing_total === 0
-              ? `🎉 You have every ${region} title in the catalog.`
+              ? `🎉 You have every ${arcade ? 'US/World' : region} title in the catalog.`
               : 'No missing titles match your search.'}
           </div>
         ) : (

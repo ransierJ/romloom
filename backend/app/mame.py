@@ -20,6 +20,7 @@ the M3 arcade Missing view introduces real region data from the MAME DAT.
 from __future__ import annotations
 
 import os
+import re
 import time
 import urllib.request
 from pathlib import Path
@@ -197,4 +198,171 @@ def status() -> dict:
         "files": {n: _path(n).is_file() for n in SOURCES},
         "sets": len(data),
         "mature": sum(1 for d in data.values() if d["mature"]),
+        "dat": dat_available(),
     }
+
+
+# --------------------------------------------------------------------------- #
+# Full arcade DAT (AntoPISA/MAME_Dats ARCADE.dat, Logiqx XML) — the authoritative
+# "what exists" list with parent/clone + region-in-description + human titles.
+# ~34 MB, so fetched on demand (when the arcade Missing view is opened), not on
+# scan. Honors a user-dropped ARCADE.dat in /config/mame the same way.
+# --------------------------------------------------------------------------- #
+ARCADE_DAT = "ARCADE.dat"
+ARCADE_DAT_URL = ("https://raw.githubusercontent.com/AntoPISA/MAME_Dats/"
+                  "main/ARCADE_dat/ARCADE.dat")
+
+# Region tokens parsed from a machine <description>, e.g. "(World, set 1)".
+_US_REGIONS = {"world", "usa", "us", "universal", "export"}
+_NONUS_REGIONS = {
+    "japan", "japón", "euro", "europe", "asia", "korea", "taiwan", "china",
+    "hong kong", "germany", "france", "italy", "spain", "netherlands", "brazil",
+    "argentina", "sweden", "denmark", "finland", "norway", "russia", "portugal",
+    "uk", "england",
+}
+
+_LABEL = {"us": "USA", "usa": "USA", "world": "World", "universal": "World",
+          "export": "Export", "euro": "Europe", "europe": "Europe"}
+
+_MACHINE_RE = re.compile(
+    r'<machine\s+name="([^"]+)"([^>]*)>\s*<description>([^<]*)</description>')
+_CLONEOF_RE = re.compile(r'cloneof="([^"]+)"')
+_PAREN_RE = re.compile(r"\(([^)]*)\)")
+
+_dat_cache: Optional[Dict[str, dict]] = None
+_dat_sig: Optional[float] = None
+
+
+def dat_available() -> bool:
+    return _path(ARCADE_DAT).is_file()
+
+
+def dat_meta() -> dict:
+    p = _path(ARCADE_DAT)
+    if not p.is_file():
+        return {"available": False}
+    m = {"available": True, "mtime": int(p.stat().st_mtime)}
+    try:
+        head = p.read_bytes()[:2000].decode("utf-8", "ignore")
+        v = re.search(r"<version>([^<]+)</version>", head)
+        if v:
+            m["version"] = v.group(1)
+    except OSError:
+        pass
+    return m
+
+
+def fetch_dat(force: bool = False) -> str:
+    """Download ARCADE.dat on demand (~34 MB). Skips if present unless force;
+    never overwrites a user-dropped file unless force. Returns a status string."""
+    dest = _path(ARCADE_DAT)
+    if dest.is_file() and not force:
+        return "present"
+    MAME_DIR.mkdir(parents=True, exist_ok=True)
+    req = urllib.request.Request(ARCADE_DAT_URL, headers={"User-Agent": "ROMLoom"})
+    with urllib.request.urlopen(req, timeout=180) as r:
+        data = r.read()
+    tmp = dest.with_suffix(dest.suffix + ".tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, dest)
+    _invalidate_dat()
+    return "fetched"
+
+
+def _invalidate_dat() -> None:
+    global _dat_cache, _dat_sig
+    _dat_cache = None
+    _dat_sig = None
+
+
+def _region_of(desc: str):
+    """(us_available: bool, label: str) from a machine description's region
+    token. Region-free descriptions are treated as broadly available."""
+    toks = set()
+    for grp in _PAREN_RE.findall(desc):
+        # Split on commas AND whitespace: region codes follow the region without
+        # a comma, e.g. "(World 910522)" or "(Japan 911210, CPS-B-13)".
+        for t in re.split(r"[,\s]+", grp):
+            toks.add(t.strip().lower())
+    for t in toks:
+        if t in _US_REGIONS:
+            return True, _LABEL.get(t, t.title())
+    for t in toks:
+        if t in _NONUS_REGIONS:
+            return False, _LABEL.get(t, t.title())
+    return True, ""   # region-free → assume available
+
+
+def load_dat() -> Dict[str, dict]:
+    """Parse ARCADE.dat into {set: {parent, clone, title, us, region}}. Skips
+    BIOS/device/non-runnable machines. Cached until the file changes."""
+    global _dat_cache, _dat_sig
+    if not dat_available():
+        return {}
+    sig = _path(ARCADE_DAT).stat().st_mtime
+    if _dat_cache is not None and sig == _dat_sig:
+        return _dat_cache
+    text = _path(ARCADE_DAT).read_text("utf-8", "ignore")
+    out: Dict[str, dict] = {}
+    for m in _MACHINE_RE.finditer(text):
+        name, attrs, desc = m.group(1), m.group(2), m.group(3)
+        if ('isdevice="yes"' in attrs or 'isbios="yes"' in attrs
+                or 'runnable="no"' in attrs or 'ismechanical="yes"' in attrs):
+            continue
+        co = _CLONEOF_RE.search(attrs)
+        us, label = _region_of(desc)
+        out[name.lower()] = {
+            "parent": co.group(1).lower() if co else None,
+            "clone": bool(co),
+            "title": desc,
+            "us": us,
+            "region": label,
+        }
+    _dat_cache, _dat_sig = out, sig
+    return out
+
+
+def arcade_missing(have_sets, *, include_clones=False, include_mature=False,
+                   include_nonus=False, include_junk=False) -> dict:
+    """Diff the arcade library against ARCADE.dat. `have_sets` is the set of
+    MAME short names on disk. Returns reference totals + the missing list. The
+    reference defaults to parent sets, US/World, non-adult, non-junk category."""
+    dat = load_dat()
+    cats = load()   # catver: category + mature
+    if not dat:
+        return {"imported": False}
+
+    # A parent counts as "present" if the user has it OR any of its clones.
+    present = set(have_sets)
+    for s in have_sets:
+        info = dat.get(s)
+        if info and info["clone"] and info["parent"]:
+            present.add(info["parent"])
+
+    # A game family is US-available if ANY set in it is US — so a parent whose
+    # only US release is a clone (e.g. Puck Man's US clone "pacman") still counts.
+    family_us = {}
+    for name, info in dat.items():
+        if info["clone"] and info["us"] and info["parent"]:
+            family_us[info["parent"]] = True
+
+    reference = []
+    for name, info in dat.items():
+        if info["clone"] and not include_clones:
+            continue
+        if not (info["us"] or family_us.get(name)) and not include_nonus:
+            continue
+        cv = cats.get(name)
+        if cv and cv["mature"] and not include_mature:
+            continue
+        top = cv["top"] if cv else None
+        if top in JUNK_TOP_CATS and not include_junk:
+            continue
+        reference.append((name, info))
+
+    have = sum(1 for n, _ in reference if n in present)
+    missing = [{"title": info["title"], "set": n, "regions": info["region"]}
+               for n, info in reference if n not in present]
+    missing.sort(key=lambda r: r["title"].lower())
+    return {"imported": True, "catalog_total": len(reference),
+            "have": have, "missing": missing}

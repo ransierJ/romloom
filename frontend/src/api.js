@@ -62,9 +62,15 @@ export const api = {
     return res.json()
   },
 
-  missing(systemId, { region = 'USA', search = '', limit = 500, offset = 0 } = {}) {
+  missing(systemId, { region = 'USA', search = '', limit = 500, offset = 0,
+                      includeClones = false, includeMature = false,
+                      includeNonus = false, includeJunk = false } = {}) {
     const p = new URLSearchParams({ region, limit, offset })
     if (search) p.set('search', search)
+    if (includeClones) p.set('include_clones', 'true')
+    if (includeMature) p.set('include_mature', 'true')
+    if (includeNonus) p.set('include_nonus', 'true')
+    if (includeJunk) p.set('include_junk', 'true')
     return get(`/api/systems/${encodeURIComponent(systemId)}/missing?${p}`)
   },
   refreshCatalog: (systemId) => send(`/api/systems/${encodeURIComponent(systemId)}/catalog/refresh`, 'POST'),

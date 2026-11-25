@@ -533,6 +533,12 @@ def _region_match(regions_csv: str, region: str) -> bool:
 
 @app.post("/api/systems/{system_id}/catalog/refresh")
 def refresh_catalog(system_id: str):
+    if mame.is_arcade(system_id):
+        try:
+            mame.fetch_dat(force=True)   # ~34 MB ARCADE.dat, on demand
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(502, f"could not fetch MAME dat: {e}")
+        return {"ok": True, "source": "MAME", **mame.dat_meta()}
     if not catalog.available(system_id):
         raise HTTPException(404, "no reference catalog exists for this system")
     try:
@@ -543,6 +549,35 @@ def refresh_catalog(system_id: str):
     return {"ok": True, **meta}
 
 
+def _arcade_missing(system_id, search, limit, offset,
+                    include_clones, include_mature, include_nonus, include_junk):
+    """Arcade Missing view: diff the library against ARCADE.dat (parent sets,
+    US/World, non-adult, non-junk by default). Returns the same shape as the
+    console Missing endpoint so the frontend renders it uniformly."""
+    base = {"available": True, "arcade": True, "imported": False, "source": "MAME",
+            "region": "USA", "catalog_total": 0, "have": 0, "missing_total": 0,
+            "missing": [], "dat": mame.dat_available()}
+    if not mame.dat_available():
+        return base   # frontend shows "Fetch catalog" -> downloads ARCADE.dat
+
+    have = {r["stem"].lower() for r in _conn.execute(
+        "SELECT stem FROM games WHERE system_id=?", (system_id,))}
+    res = mame.arcade_missing(have, include_clones=include_clones,
+                              include_mature=include_mature,
+                              include_nonus=include_nonus, include_junk=include_junk)
+    if not res.get("imported"):
+        return base
+    missing = res["missing"]
+    if search.strip():
+        term = search.strip().lower()
+        missing = [m for m in missing if term in m["title"].lower()]
+    meta = mame.dat_meta()
+    return {**base, "imported": True, "version": meta.get("version", ""),
+            "fetched_epoch": meta.get("mtime", 0),
+            "catalog_total": res["catalog_total"], "have": res["have"],
+            "missing_total": len(missing), "missing": missing[offset:offset + limit]}
+
+
 @app.get("/api/systems/{system_id}/missing")
 def missing_games(
     system_id: str,
@@ -550,7 +585,14 @@ def missing_games(
     search: str = "",
     limit: int = Query(500, ge=1, le=5000),
     offset: int = Query(0, ge=0),
+    include_clones: bool = Query(False),   # arcade
+    include_mature: bool = Query(False),   # arcade
+    include_nonus: bool = Query(False),    # arcade
+    include_junk: bool = Query(False),     # arcade
 ):
+    if mame.is_arcade(system_id):
+        return _arcade_missing(system_id, search, limit, offset,
+                               include_clones, include_mature, include_nonus, include_junk)
     base = {"available": catalog.available(system_id), "imported": False,
             "source": catalog.source_label(system_id), "region": region,
             "catalog_total": 0, "have": 0, "missing_total": 0, "missing": []}

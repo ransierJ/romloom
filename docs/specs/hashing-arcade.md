@@ -93,9 +93,18 @@ Incremental scan unaffected (skipped systems keep rows; rescanned pull from cach
   - Known limit: headered systems (NES/SNES) and byte-swapped N64 hash
     differently than No-Intro → they read `verified=0` (never wrongly matched).
     Header/byteswap normalization is M4.
-- **M3 — Arcade Missing view**: MAME DAT diff, filtered.
+- **M3 — Arcade Missing view** ✅ done: on-demand ARCADE.dat (AntoPISA/MAME_Dats,
+  Logiqx XML, ~34 MB) parsed for set list + cloneof + title + region; diffed
+  against the library, filtered to parent sets / US-World / non-adult / non-junk
+  with toggles to include each. A game family counts as US-available if any set
+  in it is US (so Pac-Man, whose US set is a clone of JP "puckman", is included).
+  - Source note: the real-region upgrade lives **in the Missing view only**; the
+    library-view "US/World" filter stays on the M1 language proxy (keeping M3
+    free of schema/scanner changes). Wiring DAT region into the live filter is a
+    small follow-up if wanted.
 - **M4 — optional**: disc/Redump multi-track hashing; headered/byteswap
-  normalization so NES/SNES/N64 verify correctly.
+  normalization so NES/SNES/N64 verify correctly; DAT region into the live
+  arcade library filter.
 
 ## Locked decisions
 1. MAME data: auto-fetch from pinned mirror AND honor user-dropped files in

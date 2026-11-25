@@ -467,7 +467,8 @@ export default function App() {
 
       <main className="main">
         {mode === 'missing' ? (
-          <MissingView systemId={active} systemName={activeSys ? activeSys.display_name : null} flash={flash} />
+          <MissingView systemId={active} systemName={activeSys ? activeSys.display_name : null}
+                       arcade={!!(activeSys && activeSys.arcade)} flash={flash} />
         ) : (
         <>
         {mode === 'collections' && collDetail && (
